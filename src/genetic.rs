@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 /// Represents a genetic algorithm, which must implement these genetic operators, for a given Genome type.
 /// It holds parameters for these operators and keeps track of its current population through generations.
-pub trait GeneticAlg {
+pub trait GenAlg {
 	type G: Genome;
 
 	/// Executes an epoch/generation by performing:
@@ -16,9 +16,6 @@ pub trait GeneticAlg {
 
 	// Evaluates the population against the given problem/simulation, updating fitnesses.
 	fn evaluate(&mut self);
-
-	/// Calculates the fitness of an individual after evaluation.
-	fn fitness(&self, indiv: &Self::G) -> f64;
 
 	/// Consumes and generates a mutated version of an individual.
 	fn mutate(&self, indiv: Self::G) -> Self::G;
@@ -34,4 +31,23 @@ pub trait GeneticAlg {
 pub trait Genome {
 	/// The distance between two Genomes, used to measure compatibility for crossover.
 	fn dist(&self, other: &Self) -> f64;
+}
+
+/// Represents a task or problem to be solved by a WebAssembly module. Should contain
+/// problem parameters and necessary training data for evaluation.
+pub trait Problem {
+	type In; // type of inputs/arguments to the Agent (e.g. (i32, i32) )
+	type Out; // type of outputs/results from the Agent (e.g. i32 )
+		  // can add stuff like externals later
+
+	/// Calculates a Solution's fitness, defined per-problem
+	fn fitness(&self, soln: impl Solution<Self>) -> f64
+	where
+		Self: Sized; // no "dyn Problem"s
+}
+
+/// A solution to a given problem.
+pub trait Solution<P: Problem> {
+	/// Works the problem given the input arguments, returning the output
+	fn exec(&self, args: P::In) -> P::Out;
 }
