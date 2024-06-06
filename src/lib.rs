@@ -18,7 +18,7 @@ use wasmtime::{Engine, Instance, Module, Store};
 // };
 
 use crate::genetic::{GenAlg, Genome, Mutator, Problem, Selector, Solution};
-use crate::mutations::NeutralAddInstr;
+use crate::mutations::NeutralAddOp;
 
 /// The genome of a Wasm agent/individual, with additional genetic data. Can generate a Wasm Agent: bytecode whose
 /// phenotype is the solution for a particular problem.
@@ -78,18 +78,17 @@ pub struct Agent {
 // 	}
 // }
 
-pub struct Context<'a> {
-	pub(crate) rng: &'a mut Pcg64Mcg,
+pub struct Context {
+	pub generation: usize,
+	pub(crate) rng: Pcg64Mcg,
 }
-
-impl<'a> Context<'a> {}
 
 /// A genetic algorithm for synthesizing WebAssembly modules.
 pub struct WasmGA<'a, P, M, S>
 where
 	P: Problem,
-	M: Mutator<WasmGenome, Context<'a>>,
-	S: Selector<WasmGenome, Context<'a>>,
+	M: Mutator<WasmGenome, Context>,
+	S: Selector<WasmGenome, Context>,
 {
 	// Parameters
 	problem: P,
@@ -102,13 +101,12 @@ where
 	// crossover: C
 	mutation_rate: f64,
 	mutation: M,
-	starter: &'a dyn Mutator<WasmGenome, Context<'a>>,
+	starter: &'a dyn Mutator<WasmGenome, Context>,
 	num_generations: usize,
 	seed: u64,
 
 	// Runtime use
-	generation: usize,
-	rng: RefCell<Pcg64Mcg>,
+	ctx: RefCell<Context>,
 	pop: Vec<WasmGenome>, // population of genomes
 	agents: Vec<Agent>,   // corresponding agents
 }
@@ -116,8 +114,8 @@ where
 impl<'a, P, M, S> WasmGA<'a, P, M, S>
 where
 	P: Problem,
-	M: Mutator<WasmGenome, Context<'a>>,
-	S: Selector<WasmGenome, Context<'a>>,
+	M: Mutator<WasmGenome, Context>,
+	S: Selector<WasmGenome, Context>,
 {
 	pub fn run(&mut self) {
 		self.init();
@@ -129,20 +127,27 @@ where
 	}
 
 	fn init(&mut self) {
-		for i in 0..self.pop_size {}
+		let params = &[ValType::I32]; // hardcoded for now, TODO fix
+		let result = &[ValType::I32];
+		for i in 0..self.pop_size {
+			let mut wg = WasmGenome::new(params, result);
+			wg = self.starter.mutate(self.ctx.get_mut(), wg);
+			self.pop.push(wg);
+		}
 	}
 }
 
 impl<'a, P, M, S> GenAlg for WasmGA<'a, P, M, S>
 where
 	P: Problem,
-	M: Mutator<WasmGenome, Context<'a>>,
-	S: Selector<WasmGenome, Context<'a>>,
+	M: Mutator<WasmGenome, Context>,
+	S: Selector<WasmGenome, Context>,
 {
 	type G = WasmGenome;
 
 	fn epoch(&mut self) {
 		todo!();
+		/*
 		self.evaluate();
 		// self.pop
 		// 	.sort_unstable_by(|a, b| f64::partial_cmp(&a.fitness, &b.fitness).unwrap()); // from now on, we're sorted
@@ -183,6 +188,7 @@ where
 		}
 
 		self.pop = nextgen;
+		 */
 	}
 
 	fn evaluate(&mut self) {
@@ -190,7 +196,7 @@ where
 	}
 
 	fn mutate(&self, indiv: Self::G) -> Self::G {
-		let mut rng = self.rng.borrow_mut();
+		// let mut rng = self.rng.borrow_mut();
 		// let mutator = NeutralAddInstr {};
 		// mutator.mutate(&indiv.genes, &mut *rng);
 
@@ -198,7 +204,7 @@ where
 	}
 
 	fn select(&self) -> HashSet<usize> {
-		let mut rng = self.rng.borrow_mut();
+		// let mut rng = self.rng.borrow_mut();
 		// (0..self.pop_size)
 		// 	.choose_multiple(&mut *rng, self.selection_cnt)
 		// 	.into_iter()
@@ -214,8 +220,8 @@ where
 pub struct WasmGABuilder<'a, P, M, S>
 where
 	P: Problem,
-	M: Mutator<WasmGenome, Context<'a>>,
-	S: Selector<WasmGenome, Context<'a>>,
+	M: Mutator<WasmGenome, Context>,
+	S: Selector<WasmGenome, Context>,
 {
 	problem: Option<P>,
 	pop_size: Option<usize>,
@@ -227,7 +233,7 @@ where
 	// crossover: Option<C>
 	mutation_rate: Option<f64>,
 	mutation: Option<M>,
-	starter: Option<&'a dyn Mutator<WasmGenome, Context<'a>>>,
+	starter: Option<&'a dyn Mutator<WasmGenome, Context>>,
 	generations: Option<usize>,
 	seed: Option<u64>,
 }
@@ -235,8 +241,8 @@ where
 impl<'a, P, M, S> WasmGABuilder<'a, P, M, S>
 where
 	P: Problem,
-	M: Mutator<WasmGenome, Context<'a>>,
-	S: Selector<WasmGenome, Context<'a>>,
+	M: Mutator<WasmGenome, Context>,
+	S: Selector<WasmGenome, Context>,
 {
 	pub fn build(self) -> WasmGA<'a, P, M, S> {
 		let size = self.pop_size.unwrap();
@@ -255,8 +261,10 @@ where
 			num_generations: self.generations.unwrap(),
 			seed,
 
-			generation: 0,
-			rng: RefCell::new(<Pcg64Mcg as SeedableRng>::seed_from_u64(seed)),
+			ctx: RefCell::new(Context {
+				generation: 0,
+				rng: <Pcg64Mcg as SeedableRng>::seed_from_u64(seed),
+			}),
 			pop: Vec::with_capacity(size),
 			agents: Vec::with_capacity(size),
 		}
@@ -307,7 +315,7 @@ where
 		self
 	}
 
-	pub fn starter(mut self, st: &'a dyn Mutator<WasmGenome, Context<'a>>) -> Self {
+	pub fn starter(mut self, st: &'a dyn Mutator<WasmGenome, Context>) -> Self {
 		self.starter = Some(st);
 		self
 	}
@@ -326,8 +334,8 @@ where
 impl<'a, P, M, S> Default for WasmGABuilder<'a, P, M, S>
 where
 	P: Problem,
-	M: Mutator<WasmGenome, Context<'a>>,
-	S: Selector<WasmGenome, Context<'a>>,
+	M: Mutator<WasmGenome, Context>,
+	S: Selector<WasmGenome, Context>,
 {
 	fn default() -> Self {
 		Self {

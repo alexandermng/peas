@@ -1,9 +1,12 @@
 //! Selection Operator Implementations
 //! See [genetic::Selector] for more info.
 
-use rand::Rng;
+use rand::{distributions::Uniform, Rng};
 
-use crate::genetic::{Genome, Selector};
+use crate::{
+	genetic::{Genome, Selector},
+	Context,
+};
 
 /// Tournament Selection
 /// https://en.wikipedia.org/wiki/Tournament_selection
@@ -12,8 +15,10 @@ pub struct TournamentSelection {
 	pub p: f64,   // probability rate
 }
 
-impl<G: Genome, C> Selector<G, C> for TournamentSelection {
-	fn select<'a>(&self, ctx: &mut C, pop: &'a [G]) -> Vec<&'a G> {
+impl<G: Genome> Selector<G, Context> for TournamentSelection {
+	fn select<'a>(&self, ctx: &mut Context, pop: &'a [G]) -> Vec<&'a G> {
+		let unif = Uniform::new(0, 10);
+		// ctx.rng.sample(unif)
 		todo!() // TODO impl
 	}
 }

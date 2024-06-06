@@ -4,14 +4,14 @@
 
 use peas::{
 	genetic::{Problem, Solution},
-	mutations::NeutralAddInstr,
+	mutations::NeutralAddOp,
 	selection::TournamentSelection,
 	Agent, WasmGABuilder, WasmGenome,
 };
 use rand::{thread_rng, Rng};
 use rayon::prelude::*;
 use walrus::{ir::UnaryOp, FunctionBuilder};
-use wasmtime::{Linker, Val};
+use wasmtime::{Linker, Store, Val};
 
 struct Sum3 {
 	tests: Vec<((i32, i32, i32), i32)>, // input-output pairs
@@ -22,12 +22,12 @@ impl Problem for Sum3 {
 	type Out = i32;
 
 	fn fitness(&self, soln: impl Solution<Sum3>) -> f64 {
-		let passed = self
+		let passed: f64 = self
 			.tests
 			.par_iter()
-			.map(|t| soln.exec(t.0) == t.1) // pass test
+			.map(|t| if soln.exec(t.0) == t.1 { 1.0 } else { 0.0 }) // pass test
 			.sum();
-		1.0 * passed / self.tests.len()
+		passed / (self.tests.len() as f64)
 	}
 }
 
@@ -66,14 +66,14 @@ fn main() {
 		// .crossover_rate(0.8)
 		// .crossover()
 		.mutation_rate(1.0)
-		.mutation(vec![
-			NeutralAddLocal::with_rate(0.01), // local variable
+		.mutation(&[
+			// NeutralAddLocal::with_rate(0.01), // local variable
 			NeutralAddOp::with_rate(0.3),
-			SwapRoot::with_rate(0.1), // consts, locals, push onto stack
-			SwapOp::with_rate(0.02),
-			AddTee::with_rate(0.02),
+			// SwapRoot::with_rate(0.1), // consts, locals, push onto stack
+			// SwapOp::with_rate(0.02),
+			// AddTee::with_rate(0.02),
 		])
-		.starter(|fb: &mut FunctionBuilder| {
+		.starter(|_, fb: &mut FunctionBuilder| {
 			// starting code for each genome
 			fb.func_body().i32_const(0);
 		})
