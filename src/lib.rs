@@ -62,6 +62,10 @@ impl Genome for WasmGenome {
 	fn dist(&self, other: &Self) -> f64 {
 		todo!() // use markers
 	}
+
+	fn fitness(&self) -> f64 {
+		self.fitness
+	}
 }
 
 /// Assembled phenotype of an individual in a genetic algorithm. Used as a solution to a problem.

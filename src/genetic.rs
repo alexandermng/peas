@@ -34,7 +34,8 @@ pub trait Genome {
 	/// The distance between two Genomes, used to measure compatibility for crossover.
 	fn dist(&self, other: &Self) -> f64;
 
-	// TODO add fitness
+	/// The fitness of this Genome after evaluated.
+	fn fitness(&self) -> f64;
 }
 
 /// Represents a task or problem to be solved by a WebAssembly module. Should contain
