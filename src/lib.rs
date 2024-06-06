@@ -37,7 +37,7 @@ impl WasmGenome {
 		let config = walrus::ModuleConfig::new();
 		let mut module = walrus::Module::with_config(config);
 		let mut func = FunctionBuilder::new(&mut module.types, params, result); // empty body
-		func.name("main".to_owned());
+		func.name(String::from("main"));
 		let args: Vec<_> = params.iter().map(|&p| module.locals.add(p)).collect();
 		let func = func.finish(args, &mut module.funcs);
 		WasmGenome {
@@ -84,7 +84,7 @@ pub struct Context {
 }
 
 /// A genetic algorithm for synthesizing WebAssembly modules.
-pub struct WasmGA<'a, P, M, S>
+pub struct WasmGA<P, M, S>
 where
 	P: Problem,
 	M: Mutator<WasmGenome, Context>,
@@ -101,7 +101,7 @@ where
 	// crossover: C
 	mutation_rate: f64,
 	mutation: M,
-	starter: &'a dyn Mutator<WasmGenome, Context>,
+	init_genome: Box<dyn Mutator<WasmGenome, Context>>,
 	num_generations: usize,
 	seed: u64,
 
@@ -111,7 +111,7 @@ where
 	agents: Vec<Agent>,   // corresponding agents
 }
 
-impl<'a, P, M, S> WasmGA<'a, P, M, S>
+impl<P, M, S> WasmGA<P, M, S>
 where
 	P: Problem,
 	M: Mutator<WasmGenome, Context>,
@@ -131,13 +131,13 @@ where
 		let result = &[ValType::I32];
 		for i in 0..self.pop_size {
 			let mut wg = WasmGenome::new(params, result);
-			wg = self.starter.mutate(self.ctx.get_mut(), wg);
+			wg = self.init_genome.mutate(self.ctx.get_mut(), wg);
 			self.pop.push(wg);
 		}
 	}
 }
 
-impl<'a, P, M, S> GenAlg for WasmGA<'a, P, M, S>
+impl<P, M, S> GenAlg for WasmGA<P, M, S>
 where
 	P: Problem,
 	M: Mutator<WasmGenome, Context>,
@@ -146,7 +146,7 @@ where
 	type G = WasmGenome;
 
 	fn epoch(&mut self) {
-		todo!();
+		todo!()
 		/*
 		self.evaluate();
 		// self.pop
@@ -217,7 +217,7 @@ where
 	}
 }
 
-pub struct WasmGABuilder<'a, P, M, S>
+pub struct WasmGABuilder<P, M, S>
 where
 	P: Problem,
 	M: Mutator<WasmGenome, Context>,
@@ -233,18 +233,18 @@ where
 	// crossover: Option<C>
 	mutation_rate: Option<f64>,
 	mutation: Option<M>,
-	starter: Option<&'a dyn Mutator<WasmGenome, Context>>,
+	init_genome: Option<Box<dyn Mutator<WasmGenome, Context>>>,
 	generations: Option<usize>,
 	seed: Option<u64>,
 }
 
-impl<'a, P, M, S> WasmGABuilder<'a, P, M, S>
+impl<P, M, S> WasmGABuilder<P, M, S>
 where
 	P: Problem,
 	M: Mutator<WasmGenome, Context>,
 	S: Selector<WasmGenome, Context>,
 {
-	pub fn build(self) -> WasmGA<'a, P, M, S> {
+	pub fn build(self) -> WasmGA<P, M, S> {
 		let size = self.pop_size.unwrap();
 		let seed = self.seed.unwrap();
 		WasmGA {
@@ -252,12 +252,12 @@ where
 			pop_size: size,
 			selection: self.selection.unwrap(),
 			enable_elitism: self.enable_elitism.unwrap(),
-			elitism_rate: self.elitism_rate.unwrap(),
+			elitism_rate: self.elitism_rate.unwrap_or_default(), // optional
 			enable_crossover: self.enable_crossover.unwrap(),
-			crossover_rate: self.crossover_rate.unwrap(),
+			crossover_rate: self.crossover_rate.unwrap_or_default(), // optional
 			mutation_rate: self.mutation_rate.unwrap(),
 			mutation: self.mutation.unwrap(),
-			starter: self.starter.unwrap(),
+			init_genome: self.init_genome.unwrap(),
 			num_generations: self.generations.unwrap(),
 			seed,
 
@@ -315,8 +315,8 @@ where
 		self
 	}
 
-	pub fn starter(mut self, st: &'a dyn Mutator<WasmGenome, Context>) -> Self {
-		self.starter = Some(st);
+	pub fn init_genome(mut self, st: Box<dyn Mutator<WasmGenome, Context>>) -> Self {
+		self.init_genome = Some(st);
 		self
 	}
 
@@ -331,7 +331,7 @@ where
 	}
 }
 
-impl<'a, P, M, S> Default for WasmGABuilder<'a, P, M, S>
+impl<P, M, S> Default for WasmGABuilder<P, M, S>
 where
 	P: Problem,
 	M: Mutator<WasmGenome, Context>,
@@ -348,7 +348,7 @@ where
 			crossover_rate: None,
 			mutation_rate: None,
 			mutation: None,
-			starter: None,
+			init_genome: None,
 			generations: None,
 			seed: None,
 		}
