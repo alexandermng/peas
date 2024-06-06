@@ -12,7 +12,7 @@ use rand::{
 };
 use rand_pcg::Pcg64Mcg;
 use walrus::{FunctionBuilder, LocalFunction, ValType};
-use wasmtime::{Engine, Instance, Module, Store};
+use wasmtime::{Engine, Instance, Linker, Module, Store, WasmTy};
 // use wasm_encoder::{
 // 	CodeSection, Function, FunctionSection, Instruction, Module, TypeSection, ValType,
 // };
@@ -72,11 +72,22 @@ pub struct Agent {
 	pub fitness: f64,
 }
 
-// impl<P: Problem> Solution<P> for Agent {
-// 	fn solve(&self, args: P::In) -> P::Out {
-// 		todo!() // i can only do this if I can genericify it
-// 	}
-// }
+impl<P: Problem> Solution<P> for Agent
+where
+	P::In: WasmTy,
+	P::Out: WasmTy,
+{
+	fn exec(&self, args: P::In) -> P::Out {
+		let linker = Linker::new(&self.engine);
+		let mut store = Store::new(&self.engine, ());
+		let instance = linker.instantiate(&mut store, &self.module).unwrap();
+		let main = instance
+			.get_typed_func::<<P as Problem>::In, <P as Problem>::Out>(&mut store, "main")
+			.unwrap();
+
+		main.call(&mut store, args).unwrap()
+	}
+}
 
 pub struct Context {
 	pub generation: usize,

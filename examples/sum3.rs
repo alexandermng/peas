@@ -31,18 +31,18 @@ impl Problem for Sum3 {
 	}
 }
 
-impl Solution<Sum3> for Agent {
-	fn exec(&self, input: (i32, i32, i32)) -> i32 {
-		let linker = Linker::new(&self.engine);
-		let mut store = Store::new(&self.engine, ());
-		let instance = linker.instantiate(&mut store, &self.module).unwrap();
-		let main = instance
-			.get_typed_func::<<Sum3 as Problem>::In, <Sum3 as Problem>::Out>(&mut store, "main")
-			.unwrap();
+// impl Solution<Sum3> for Agent {
+// 	fn exec(&self, input: (i32, i32, i32)) -> i32 {
+// 		let linker = Linker::new(&self.engine);
+// 		let mut store = Store::new(&self.engine, ());
+// 		let instance = linker.instantiate(&mut store, &self.module).unwrap();
+// 		let main = instance
+// 			.get_typed_func::<<Sum3 as Problem>::In, <Sum3 as Problem>::Out>(&mut store, "main")
+// 			.unwrap();
 
-		main.call(&mut store, input).unwrap()
-	}
-}
+// 		main.call(&mut store, input).unwrap()
+// 	}
+// }
 
 fn main() {
 	let tests = vec![
