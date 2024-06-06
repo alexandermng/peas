@@ -11,6 +11,7 @@ use rand::{
 	Rng, SeedableRng,
 };
 use rand_pcg::Pcg64Mcg;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use walrus::{FunctionBuilder, LocalFunction, ValType};
 use wasmtime::{Engine, Instance, Linker, Module, Store, WasmTy};
 // use wasm_encoder::{
@@ -28,7 +29,7 @@ pub struct WasmGenome {
 	func: walrus::FunctionId, // mutatable main (LocalFunction) in module
 	markers: Vec<usize>,      // markers for main, by instruction
 
-	fitness: Option<f64>, // None if not run before
+	fitness: f64,
 }
 
 impl WasmGenome {
@@ -44,7 +45,7 @@ impl WasmGenome {
 			module,
 			func,
 			markers: vec![], // TODO consider type
-			fitness: None,
+			fitness: 0.0,
 		}
 	}
 
@@ -52,8 +53,8 @@ impl WasmGenome {
 		self.module.funcs.get_mut(self.func).kind.unwrap_local_mut()
 	}
 
-	pub fn emit(&self) -> Agent {
-		todo!() // TODO
+	pub fn emit(&mut self) -> Vec<u8> {
+		self.module.emit_wasm()
 	}
 }
 
@@ -69,11 +70,19 @@ pub struct Agent {
 	pub engine: Engine,
 	pub module: Module,
 	// ^ todo consider access. also starting state to seed Store<_>
-	pub fitness: f64,
+	// pub fitness: f64,
 }
 
-impl<P: Problem> Solution<P> for Agent
+impl Agent {
+	fn new(engine: Engine, binary: &[u8]) -> Self {
+		let module = Module::from_binary(&engine, binary).unwrap();
+		Agent { engine, module }
+	}
+}
+
+impl<P> Solution<P> for Agent
 where
+	P: Problem,
 	P::In: WasmTy,
 	P::Out: WasmTy,
 {
@@ -86,6 +95,16 @@ where
 			.unwrap();
 
 		main.call(&mut store, args).unwrap()
+	}
+}
+
+impl<P, T> Solution<P> for &T
+where
+	P: Problem,
+	T: Solution<P>,
+{
+	fn exec(&self, args: P::In) -> P::Out {
+		(**self).exec(args)
 	}
 }
 
@@ -117,6 +136,7 @@ where
 	seed: u64,
 
 	// Runtime use
+	engine: Engine,
 	ctx: RefCell<Context>,
 	pop: Vec<WasmGenome>, // population of genomes
 	agents: Vec<Agent>,   // corresponding agents
@@ -124,14 +144,16 @@ where
 
 impl<P, M, S> WasmGA<P, M, S>
 where
-	P: Problem,
+	P: Problem + Sync,
 	M: Mutator<WasmGenome, Context>,
 	S: Selector<WasmGenome, Context>,
+	P::In: WasmTy,
+	P::Out: WasmTy,
 {
 	pub fn run(&mut self) {
 		self.init();
 		for n in 0..self.num_generations {
-			self.epoch()
+			self.epoch();
 
 			// TODO logging
 		}
@@ -150,13 +172,18 @@ where
 
 impl<P, M, S> GenAlg for WasmGA<P, M, S>
 where
-	P: Problem,
+	P: Problem + Sync,
 	M: Mutator<WasmGenome, Context>,
 	S: Selector<WasmGenome, Context>,
+	P::In: WasmTy,
+	P::Out: WasmTy,
 {
 	type G = WasmGenome;
 
 	fn epoch(&mut self) {
+		self.evaluate();
+
+		self.ctx.get_mut().generation += 1;
 		todo!()
 		/*
 		self.evaluate();
@@ -203,15 +230,25 @@ where
 	}
 
 	fn evaluate(&mut self) {
-		todo!() // TODO... evaluate Agent based on problem P
+		self.agents = self
+			.pop
+			.iter_mut() // OPT can I par_iter here?
+			.map(WasmGenome::emit)
+			.map(|b| Agent::new(self.engine.clone(), &b))
+			.collect();
+		let fitnai: Vec<_> = self
+			.agents
+			.par_iter()
+			.map(|a| self.problem.fitness(a))
+			.collect();
+		for (g, f) in Iterator::zip(self.pop.iter_mut(), fitnai) {
+			g.fitness = f;
+		}
 	}
 
 	fn mutate(&self, indiv: Self::G) -> Self::G {
-		// let mut rng = self.rng.borrow_mut();
-		// let mutator = NeutralAddInstr {};
-		// mutator.mutate(&indiv.genes, &mut *rng);
-
-		todo!()
+		let mut ctx = self.ctx.borrow_mut();
+		self.mutation.mutate(&mut *ctx, indiv)
 	}
 
 	fn select(&self) -> HashSet<usize> {
@@ -263,15 +300,17 @@ where
 			pop_size: size,
 			selection: self.selection.unwrap(),
 			enable_elitism: self.enable_elitism.unwrap(),
-			elitism_rate: self.elitism_rate.unwrap_or_default(), // optional
+			elitism_rate: self.elitism_rate.unwrap(),
 			enable_crossover: self.enable_crossover.unwrap(),
-			crossover_rate: self.crossover_rate.unwrap_or_default(), // optional
+			crossover_rate: self.crossover_rate.unwrap(),
 			mutation_rate: self.mutation_rate.unwrap(),
 			mutation: self.mutation.unwrap(),
 			init_genome: self.init_genome.unwrap(),
 			num_generations: self.generations.unwrap(),
 			seed,
 
+			// Runtime use
+			engine: Engine::default(),
 			ctx: RefCell::new(Context {
 				generation: 0,
 				rng: <Pcg64Mcg as SeedableRng>::seed_from_u64(seed),
@@ -354,9 +393,9 @@ where
 			pop_size: None,
 			selection: None,
 			enable_elitism: None,
-			elitism_rate: None,
+			elitism_rate: Some(0.0),
 			enable_crossover: None,
-			crossover_rate: None,
+			crossover_rate: Some(0.0),
 			mutation_rate: None,
 			mutation: None,
 			init_genome: None,
