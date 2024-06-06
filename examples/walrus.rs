@@ -108,10 +108,32 @@ fn main() -> walrus::Result<()> {
 			.unop(UnaryOp::I32Eqz);
 	}
 
+	struct Printer;
+	impl<'i> Visitor<'i> for Printer {
+		fn visit_instr(&mut self, instr: &'i Instr, _instr_loc: &'i InstrLocId) {
+			println!("Came across {instr:?}");
+		}
+	}
+	impl VisitorMut for Printer {
+		fn visit_instr_mut(&mut self, instr: &mut Instr, loc: &mut InstrLocId) {
+			println!("Mutated {instr:?}\tat {loc:?}");
+		}
+	}
+	println!("PRINTING IN ORDER");
+	dfs_in_order(&mut Printer {}, &factorial, factorial.entry_block());
+	println!("PRINTING PRE ORDER");
+	let start = factorial.entry_block();
+	dfs_pre_order_mut(&mut Printer {}, &mut factorial, start);
+
 	let factorial_id = module.funcs.add_local(factorial);
 
 	// Export the `factorial` function.
 	module.exports.add("factorial", factorial_id);
+
+	{
+		let fact = module.funcs.get_mut(factorial_id).kind.unwrap_local_mut();
+		fact.builder_mut().func_body().local_get(n).drop();
+	}
 
 	// Emit the `.wasm` binary to the `target/out.wasm` file.
 	module.emit_wasm_file("target/factorial.wasm")?;

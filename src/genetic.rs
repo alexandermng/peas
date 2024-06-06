@@ -2,6 +2,8 @@
 
 use std::collections::HashSet;
 
+use rand::Rng;
+
 /// Represents a genetic algorithm, which must implement these genetic operators, for a given Genome type.
 /// It holds parameters for these operators and keeps track of its current population through generations.
 pub trait GenAlg {
@@ -47,7 +49,22 @@ pub trait Problem {
 }
 
 /// A solution to a given problem.
-pub trait Solution<P: Problem> {
+pub trait Solution<P: Problem>: Sync {
 	/// Works the problem given the input arguments, returning the output
 	fn exec(&self, args: P::In) -> P::Out;
+}
+
+/// The selection operator in a Genetic Algorithm
+pub trait Selector<G: Genome, C> {
+	fn select<'a>(&self, ctx: &mut C, pop: &'a [G]) -> Vec<&'a G>;
+}
+
+/// The mutation operator in a Genetic Algorithm
+pub trait Mutator<G: Genome, C> {
+	fn mutate(&self, ctx: &mut C, indiv: G) -> G;
+}
+
+/// The crossover operator in a Genetic Algorithm
+pub trait Recombiner<G: Genome, C> {
+	fn crossover(&self, ctx: &mut C, par_a: G, par_b: &G) -> G;
 }

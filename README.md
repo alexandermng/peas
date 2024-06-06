@@ -18,3 +18,4 @@ and it does the rest)
 - rework Solutions for RL / simulation-based fitness w/ timesteps
 - store graph representation??
 - consider caching things
+- rayon parallelize compilation. also, need to config wasmtime pooling allocator? high-instantiation definitely

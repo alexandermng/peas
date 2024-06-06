@@ -5,11 +5,13 @@
 use peas::{
 	genetic::{Problem, Solution},
 	mutations::NeutralAddInstr,
-	WasmGenome,
+	selection::TournamentSelection,
+	Agent, WasmGABuilder, WasmGenome,
 };
+use rand::{thread_rng, Rng};
 use rayon::prelude::*;
 use walrus::{ir::UnaryOp, FunctionBuilder};
-use wasmtime::Linker;
+use wasmtime::{Linker, Val};
 
 struct Sum3 {
 	tests: Vec<((i32, i32, i32), i32)>, // input-output pairs
@@ -25,7 +27,7 @@ impl Problem for Sum3 {
 			.par_iter()
 			.map(|t| soln.exec(t.0) == t.1) // pass test
 			.sum();
-		1.0 * passed / tests.len()
+		1.0 * passed / self.tests.len()
 	}
 }
 
@@ -53,10 +55,10 @@ fn main() {
 		((0, -1, 3), 2),
 	];
 	let prob = Sum3 { tests };
-	let seed = 1;
+	let seed = thread_rng().gen();
 	let ga = WasmGABuilder::default()
 		.problem(prob)
-		.popsize(100)
+		.pop_size(100)
 		.selection(TournamentSelection { k: 3, p: 0.9 })
 		.enable_elitism(true)
 		.elitism_rate(0.1)
