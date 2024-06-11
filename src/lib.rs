@@ -12,7 +12,7 @@ use rand::{
 	Rng, SeedableRng,
 };
 use rand_pcg::Pcg64Mcg;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use walrus::{FunctionBuilder, LocalFunction, ValType};
 use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
 // use wasm_encoder::{
@@ -297,7 +297,11 @@ where
 			self.pop = nextgen.drain(0..elitism_cnt).collect();
 		}
 		log::info!("Mutating {} genomes.", nextgen.len());
-		nextgen = nextgen.into_iter().map(|g| self.mutate(g)).collect(); // OPT- collect into pop directly? rust stupid
+		nextgen = nextgen
+			// .into_par_iter() // OPT
+			.into_iter()
+			.map(|g| self.mutate(g))
+			.collect(); // OPT- collect into pop directly? rust stupid
 
 		// Add to next generation!
 		self.pop.append(&mut nextgen);
@@ -357,7 +361,7 @@ where
 	// crossover: Option<C>
 	mutation_rate: Option<f64>,
 	mutation: Option<M>,
-	init_genome: Option<Box<dyn Mutator<WasmGenome, Context>>>,
+	starter: Option<Box<dyn Mutator<WasmGenome, Context>>>,
 	generations: Option<usize>,
 	seed: Option<u64>,
 }
@@ -381,7 +385,7 @@ where
 			crossover_rate: self.crossover_rate.unwrap(),
 			mutation_rate: self.mutation_rate.unwrap(),
 			mutation: self.mutation.unwrap(),
-			init_genome: self.init_genome.unwrap(),
+			init_genome: self.starter.unwrap(),
 			num_generations: self.generations.unwrap(),
 			seed,
 
@@ -441,8 +445,8 @@ where
 		self
 	}
 
-	pub fn init_genome(mut self, st: Box<dyn Mutator<WasmGenome, Context>>) -> Self {
-		self.init_genome = Some(st);
+	pub fn init_genome(mut self, init: Box<dyn Mutator<WasmGenome, Context>>) -> Self {
+		self.starter = Some(init);
 		self
 	}
 
@@ -474,7 +478,7 @@ where
 			crossover_rate: Some(0.0),
 			mutation_rate: None,
 			mutation: None,
-			init_genome: None,
+			starter: None,
 			generations: None,
 			seed: None,
 		}

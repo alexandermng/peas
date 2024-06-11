@@ -1,8 +1,4 @@
-use std::{
-	borrow::Borrow,
-	fs::{self, File},
-	io::Write,
-};
+use std::{fs::File, io::Write};
 
 use eyre::{eyre, Result};
 use peas::WasmGenome;

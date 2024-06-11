@@ -3,8 +3,8 @@
 //!
 
 use peas::{
-	genetic::{Problem, Solution},
-	mutations::NeutralAddOp,
+	genetic::{Mutator, Problem, Solution},
+	mutations::{NeutralAddOp, Rated, SequenceMutator, SwapRoot},
 	selection::TournamentSelection,
 	Context, WasmGABuilder,
 };
@@ -54,6 +54,15 @@ fn main() {
 	];
 	let prob = Sum3 { tests };
 	let seed: u64 = thread_rng().gen();
+	let muts: [&dyn Mutator<_, _>; 2] = [
+		// for use in sequence
+		// NeutralAddLocal::with_rate(0.01), // local variable
+		&Rated::new(NeutralAddOp, 0.3),
+		&Rated::new(SwapRoot, 0.1), // consts, locals, push onto stack
+
+		                            // SwapOp::with_rate(0.02),
+		                            // AddTee::with_rate(0.02),
+	];
 	let mut ga = WasmGABuilder::default()
 		.problem(prob)
 		.pop_size(5)
@@ -65,15 +74,7 @@ fn main() {
 		// .crossover_rate(0.8)
 		// .crossover()
 		.mutation_rate(1.0)
-		.mutation(
-			//&[
-			// NeutralAddLocal::with_rate(0.01), // local variable
-			NeutralAddOp::with_rate(0.3),
-			// SwapRoot::with_rate(0.1), // consts, locals, push onto stack
-			// SwapOp::with_rate(0.02),
-			// AddTee::with_rate(0.02),
-			//	]
-		)
+		.mutation(SequenceMutator::from(&muts[..]))
 		.init_genome(Box::new(|_ctx: &mut Context, fb: &mut FunctionBuilder| {
 			// starting code for each genome
 			fb.func_body().i32_const(1);
