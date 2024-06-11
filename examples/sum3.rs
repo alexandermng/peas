@@ -74,9 +74,9 @@ fn main() {
 		.problem(prob)
 		.pop_size(100)
 		.generations(10)
-		.selection(TournamentSelection { k: 3, p: 0.9 })
+		.selection(TournamentSelection::new(0.8, 3, 0.9, false)) // can do real tournament selection when selection is fixed
 		.enable_elitism(true)
-		.elitism_rate(0.1)
+		.elitism_rate(0.05)
 		.enable_crossover(false)
 		// .crossover_rate(0.8)
 		// .crossover()

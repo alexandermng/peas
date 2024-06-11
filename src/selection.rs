@@ -1,7 +1,11 @@
 //! Selection Operator Implementations
 //! See [genetic::Selector] for more info.
 
-use rand::{distributions::Uniform, Rng};
+use rand::{
+	distributions::{Bernoulli, Distribution, Uniform},
+	seq::{IteratorRandom, SliceRandom},
+	Rng,
+};
 
 use crate::{
 	genetic::{Genome, Selector},
@@ -11,14 +15,56 @@ use crate::{
 /// Tournament Selection
 /// https://en.wikipedia.org/wiki/Tournament_selection
 pub struct TournamentSelection {
-	pub k: usize, // tournament size
-	pub p: f64,   // probability rate
+	pub rate: f64,     // selection rate determining selection pressure (in 0..1)
+	k: usize,          // tournament size
+	p: f64,            // probability rate
+	replacement: bool, // whether to replace chosen individuals
 }
 
-impl<G: Genome> Selector<G, Context> for TournamentSelection {
-	fn select<'a>(&self, ctx: &mut Context, pop: &'a [G]) -> Vec<&'a G> {
-		let unif = Uniform::new(0, 10);
-		// ctx.rng.sample(unif)
-		todo!() // TODO impl
+impl TournamentSelection {
+	pub fn new(rate: f64, tournament_size: usize, probability: f64, replacement: bool) -> Self {
+		assert!(
+			(0.0..=1.0).contains(&rate),
+			"selection rate must be in [0,1]"
+		);
+		assert!(
+			(0.0..=1.0).contains(&probability),
+			"probability rate must be in [0,1]"
+		);
+		Self {
+			rate,
+			k: tournament_size,
+			p: probability,
+			replacement,
+		}
+	}
+}
+
+impl<G> Selector<G, Context> for TournamentSelection
+where
+	G: Genome + Clone,
+{
+	fn select(&self, ctx: &mut Context, mut pop: Vec<G>) -> Vec<G> {
+		let mut out = vec![];
+		let bern = Bernoulli::new(self.p).unwrap();
+		let selection_cnt = (self.rate * (pop.len() as f64)) as usize;
+		while out.len() < selection_cnt {
+			let mut tourney: Vec<_> = pop
+				.iter() // length k (or however many left)
+				.enumerate()
+				.choose_multiple(&mut ctx.rng, self.k);
+			tourney.sort_unstable_by(|(_, a), (_, b)| f64::total_cmp(&b.fitness(), &a.fitness()));
+			let winner = (0..tourney.len())
+				.find(|_| bern.sample(&mut ctx.rng)) // first with chance p, second with p*(1-p), ...
+				.unwrap_or(tourney.len() - 1);
+			let winner = tourney[winner].0; // actual index
+			let winner = if self.replacement {
+				pop[winner].clone()
+			} else {
+				pop.swap_remove(winner)
+			};
+			out.push(winner);
+		}
+		out
 	}
 }

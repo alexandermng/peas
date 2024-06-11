@@ -123,7 +123,11 @@ where
 			self.epoch();
 
 			// TODO logging hooks
-			log::info!("Finished generation {}.", self.ctx.borrow().generation);
+			log::info!(
+				"Finished generation {} ({} individuals).",
+				self.ctx.borrow().generation,
+				self.pop.len()
+			);
 			self.ctx.get_mut().generation += 1;
 
 			// TODO end condition / max fitness
@@ -183,10 +187,9 @@ where
 		}
 
 		// TODO extract selection
-		// self.selection.select(self.ctx.get_mut(), &self.pop)
-		let mut selected: Vec<WasmGenome> = mem::take(&mut self.pop) // pop empty after selection
-			.into_iter()
-			.choose_multiple(&mut self.ctx.get_mut().rng, self.pop_size - nextgen.len());
+		let mut selected = self
+			.selection
+			.select(self.ctx.get_mut(), mem::take(&mut self.pop)); // pop empty after selection
 		log::info!(
 			"Selected {} individuals from current population.",
 			selected.len()
@@ -202,9 +205,18 @@ where
 
 		// Mutation
 		if self.enable_elitism {
-			self.pop = nextgen.drain(0..elitism_cnt).collect();
+			self.pop = nextgen[0..elitism_cnt].to_vec(); // clone elites
 		}
-		log::info!("Mutating {} genomes.", nextgen.len());
+		let needed = self.pop_size - self.pop.len() - nextgen.len(); // amount needed
+		log::info!(
+			"Mutating {} unique genomes (+{needed} copy-variants).",
+			nextgen.len()
+		);
+		let fill: Vec<_> = nextgen
+			.choose_multiple(&mut self.ctx.get_mut().rng, needed)
+			.cloned()
+			.collect(); // fill to capacity
+		nextgen.extend(fill);
 		nextgen = nextgen
 			// .into_par_iter() // OPT
 			.into_iter()

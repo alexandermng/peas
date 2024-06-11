@@ -20,3 +20,4 @@ For each example problem, we define `OurProblem` and implement it as a `Problem`
 - store graph representation?? how to detect valid
 - consider caching things
 - rayon parallelize compilation. also, need to config wasmtime pooling allocator? high-instantiation definitely
+- impl Serialize for WasmGenome, for logging

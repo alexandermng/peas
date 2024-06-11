@@ -73,10 +73,10 @@ impl WasmGenome {
 				"fitness"
 			}
 			fn data(&self, _ids_to_indices: &walrus::IdsToIndices) -> std::borrow::Cow<[u8]> {
-				std::borrow::Cow::Owned(self.0.to_le_bytes().into())
+				std::borrow::Cow::Owned(self.0.to_string().into_bytes())
 			}
 		}
-		module.customs.add(Fitness(self.fitness));
+		module.customs.add(Fitness(self.fitness)); // TODO debug why cant i see
 		module.producers.clear(); // it should rly skip this already tho :/
 		module.emit_wasm()
 	}
@@ -112,6 +112,7 @@ impl std::fmt::Display for WasmGenome {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.write_str("Genome[")?;
 		for b in self.emit() {
+			// TODO OPT: shed chaff, just core main code
 			write!(f, "{:X}", b)?;
 		}
 		f.write_str("]")

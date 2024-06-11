@@ -31,7 +31,7 @@ impl Mutator<WasmGenome, Context> for NeutralAddOp {
 		];
 		let (op, ident) = ALLOWED_OPS.choose(&mut ctx.rng).unwrap();
 
-		log::info!(
+		log::debug!(
 			"Adding Operation {op:?} at {loc} (within 0..{})",
 			indiv.func().size()
 		);
@@ -72,7 +72,7 @@ impl Mutator<WasmGenome, Context> for SwapRoot {
 			}
 			_ => unreachable!("we don't generate outside handled range"),
 		};
-		log::info!(
+		log::debug!(
 			"Swapping {:?} into {:?}",
 			indiv.func().block(entry)[loc].0,
 			instr

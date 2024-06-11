@@ -59,7 +59,7 @@ pub trait Solution<P: Problem>: Sync {
 
 /// The selection operator in a Genetic Algorithm
 pub trait Selector<G: Genome, C> {
-	fn select<'a>(&self, ctx: &mut C, pop: &'a [G]) -> Vec<&'a G>;
+	fn select(&self, ctx: &mut C, pop: Vec<G>) -> Vec<G>;
 }
 
 /// The mutation operator in a Genetic Algorithm
