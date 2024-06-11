@@ -72,6 +72,11 @@ impl Mutator<WasmGenome, Context> for SwapRoot {
 			}
 			_ => unreachable!("we don't generate outside handled range"),
 		};
+		log::info!(
+			"Swapping {:?} into {:?}",
+			indiv.func().block(entry)[loc].0,
+			instr
+		);
 		indiv.func().block_mut(entry)[loc].0 = instr;
 		indiv
 	}

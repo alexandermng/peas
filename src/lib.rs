@@ -1,6 +1,7 @@
 #![allow(unused)] // for now
 
 pub mod genetic;
+pub mod genome;
 pub mod mutations;
 pub mod selection;
 
@@ -13,107 +14,16 @@ use rand::{
 };
 use rand_pcg::Pcg64Mcg;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use walrus::{FunctionBuilder, LocalFunction, ValType};
+use walrus::{CustomSection, FunctionBuilder, LocalFunction, ValType};
 use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
 // use wasm_encoder::{
 // 	CodeSection, Function, FunctionSection, Instruction, Module, TypeSection, ValType,
 // };
 
+pub use crate::genome::WasmGenome;
+
 use crate::genetic::{GenAlg, Genome, Mutator, Problem, Selector, Solution};
 use crate::mutations::NeutralAddOp;
-
-/// The genome of a Wasm agent/individual, with additional genetic data. Can generate a Wasm Agent: bytecode whose
-/// phenotype is the solution for a particular problem.
-pub struct WasmGenome {
-	module: RefCell<walrus::Module>, // in progress module
-	func: walrus::FunctionId,        // mutatable main (LocalFunction) in module
-	markers: Vec<usize>,             // markers for main, by instruction
-
-	fitness: f64,
-}
-
-impl WasmGenome {
-	/// Create a new WasmGenome with the given signature for the main function.
-	pub fn new(params: &[ValType], result: &[ValType]) -> Self {
-		let config = walrus::ModuleConfig::new();
-		let mut module = walrus::Module::with_config(config);
-		let mut func = FunctionBuilder::new(&mut module.types, params, result); // empty body
-		let args: Vec<_> = params.iter().map(|&p| module.locals.add(p)).collect();
-		let func = func.finish(args, &mut module.funcs);
-		module.exports.add("main", func);
-		WasmGenome {
-			module: RefCell::new(module),
-			func,
-			markers: vec![], // TODO consider type
-			fitness: 0.0,
-		}
-	}
-
-	pub fn from_binary(binary: &[u8]) -> Result<Self> {
-		let mut module = walrus::Module::from_buffer(binary)
-			.map_err(|e| eyre!("could not create module: {e}"))?;
-		let func = module
-			.funcs
-			.by_name("main")
-			.ok_or_eyre("main function not present")?;
-		Ok(WasmGenome {
-			module: RefCell::new(module),
-			func,
-			markers: vec![],
-			fitness: 0.0,
-		})
-	}
-
-	pub fn func(&mut self) -> &mut walrus::LocalFunction {
-		// TODO consider if we need mut for func
-		self.module
-			.get_mut()
-			.funcs
-			.get_mut(self.func)
-			.kind
-			.unwrap_local_mut()
-	}
-
-	pub fn emit(&self) -> Vec<u8> {
-		self.module.borrow_mut().emit_wasm()
-	}
-}
-
-impl Genome for WasmGenome {
-	fn dist(&self, other: &Self) -> f64 {
-		todo!() // use markers
-	}
-
-	fn fitness(&self) -> f64 {
-		self.fitness
-	}
-}
-
-impl Clone for WasmGenome {
-	fn clone(&self) -> Self {
-		WasmGenome::from_binary(&self.emit()).unwrap() // emitted module should be valid
-	}
-}
-
-impl std::fmt::Debug for WasmGenome {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("WasmGenome")
-			.field("func", &self.func)
-			// .field("markers", &self.markers)
-			.field("fitness", &self.fitness)
-			.finish()
-	}
-}
-
-impl std::fmt::Display for WasmGenome {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.write_str("Genome[")?;
-		for b in self.emit() {
-			write!(f, "{:X}", b)?;
-		}
-		f.write_str("]")
-	}
-}
 
 /// Assembled phenotype of an individual in a genetic algorithm. Used as a solution to a problem.
 #[derive(Clone)]
@@ -208,13 +118,15 @@ where
 		fs::create_dir(dirname).unwrap();
 
 		for n in 0..self.num_generations {
-			log::info!("Starting generation {}", self.ctx.borrow().generation);
+			log::info!("Starting generation {}.", self.ctx.borrow().generation);
 
 			self.epoch();
 
-			// TODO logging
-			log::info!("Finished generation {}", self.ctx.borrow().generation);
+			// TODO logging hooks
+			log::info!("Finished generation {}.", self.ctx.borrow().generation);
 			self.ctx.get_mut().generation += 1;
+
+			// TODO end condition / max fitness
 		}
 	}
 
@@ -226,11 +138,6 @@ where
 			wg = self.init_genome.mutate(self.ctx.get_mut(), wg);
 			self.pop.push(wg);
 		}
-		// log::info!("Genome 1 is {:?}", self.pop[0]);
-		// self.pop[0]
-		// 	.module
-		// 	.get_mut()
-		// 	.emit_wasm_file("./genome_init.wasm");
 	}
 }
 
@@ -248,11 +155,11 @@ where
 		self.evaluate();
 
 		self.pop
-			.sort_unstable_by(|a, b| f64::partial_cmp(&a.fitness, &b.fitness).unwrap());
+			.sort_unstable_by(|a, b| f64::partial_cmp(&b.fitness, &a.fitness).unwrap());
 
-		log::info!("Population:");
-		for p in &self.pop {
-			log::info!("\t{} <-- {:?}", p.fitness, p.emit());
+		log::info!("Top 10:");
+		for p in self.pop.iter().take(10) {
+			log::info!("\t{} <-- {}", p.fitness, p);
 		}
 		let filename = format!(
 			"trial_{}.log/gen_{}.wasm",
@@ -281,12 +188,13 @@ where
 			.into_iter()
 			.choose_multiple(&mut self.ctx.get_mut().rng, self.pop_size - nextgen.len());
 		log::info!(
-			"Selected {} genomes from current population.",
+			"Selected {} individuals from current population.",
 			selected.len()
 		);
 
 		if self.enable_crossover {
 			let crossover_cnt = (self.crossover_rate * (self.pop_size as f64)) as usize;
+			log::info!("Crossing over {crossover_cnt} individuals.");
 			todo!() // TODO crossover selected
 		} else {
 			nextgen.append(&mut selected);
@@ -317,7 +225,7 @@ where
 			.collect();
 		let fitnai: Vec<_> = self
 			.agents
-			.iter()
+			.par_iter()
 			.map(|a| self.problem.fitness(a))
 			.collect();
 		for (g, f) in Iterator::zip(self.pop.iter_mut(), fitnai) {
@@ -327,7 +235,6 @@ where
 
 	fn mutate(&self, indiv: Self::G) -> Self::G {
 		let mut ctx = self.ctx.borrow_mut();
-		log::info!("MUTATING {indiv}");
 		self.mutation.mutate(&mut *ctx, indiv)
 	}
 
