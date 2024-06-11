@@ -43,7 +43,9 @@ impl NeutralAddOp {
 }
 impl Mutator<WasmGenome, Context> for NeutralAddOp {
 	fn mutate(&self, ctx: &mut Context, mut indiv: WasmGenome) -> WasmGenome {
+		// TODO rate
 		let instrs = &indiv.func().instruction_mapping;
+		log::info!("Instruction Mapping: {instrs:?}");
 		let unif = Uniform::new(0, instrs.len());
 		let chosen = instrs[unif.sample(&mut ctx.rng)]; // chosen mutation location
 		let loc = chosen.0;

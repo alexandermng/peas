@@ -4,8 +4,9 @@ pub mod genetic;
 pub mod mutations;
 pub mod selection;
 
-use std::{borrow::BorrowMut, cell::RefCell, collections::HashSet, mem};
+use std::{borrow::BorrowMut, cell::RefCell, collections::HashSet, fs, mem};
 
+use eyre::{eyre, OptionExt, Result};
 use rand::{
 	seq::{IteratorRandom, SliceRandom},
 	Rng, SeedableRng,
@@ -13,7 +14,7 @@ use rand::{
 use rand_pcg::Pcg64Mcg;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use walrus::{FunctionBuilder, LocalFunction, ValType};
-use wasmtime::{Engine, Instance, Linker, Module, Store, WasmTy};
+use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
 // use wasm_encoder::{
 // 	CodeSection, Function, FunctionSection, Instruction, Module, TypeSection, ValType,
 // };
@@ -23,11 +24,10 @@ use crate::mutations::NeutralAddOp;
 
 /// The genome of a Wasm agent/individual, with additional genetic data. Can generate a Wasm Agent: bytecode whose
 /// phenotype is the solution for a particular problem.
-#[derive(Debug)]
 pub struct WasmGenome {
-	module: walrus::Module,   // in progress module
-	func: walrus::FunctionId, // mutatable main (LocalFunction) in module
-	markers: Vec<usize>,      // markers for main, by instruction
+	module: RefCell<walrus::Module>, // in progress module
+	func: walrus::FunctionId,        // mutatable main (LocalFunction) in module
+	markers: Vec<usize>,             // markers for main, by instruction
 
 	fitness: f64,
 }
@@ -38,23 +38,44 @@ impl WasmGenome {
 		let config = walrus::ModuleConfig::new();
 		let mut module = walrus::Module::with_config(config);
 		let mut func = FunctionBuilder::new(&mut module.types, params, result); // empty body
-		func.name(String::from("main"));
 		let args: Vec<_> = params.iter().map(|&p| module.locals.add(p)).collect();
 		let func = func.finish(args, &mut module.funcs);
+		module.exports.add("main", func);
 		WasmGenome {
-			module,
+			module: RefCell::new(module),
 			func,
 			markers: vec![], // TODO consider type
 			fitness: 0.0,
 		}
 	}
 
-	pub fn func(&mut self) -> &mut walrus::LocalFunction {
-		self.module.funcs.get_mut(self.func).kind.unwrap_local_mut()
+	pub fn from_binary(binary: &[u8]) -> Result<Self> {
+		let mut module = walrus::Module::from_buffer(binary)
+			.map_err(|e| eyre!("could not create module: {e}"))?;
+		let func = module
+			.funcs
+			.by_name("main")
+			.ok_or_eyre("main function not present")?;
+		Ok(WasmGenome {
+			module: RefCell::new(module),
+			func,
+			markers: vec![],
+			fitness: 0.0,
+		})
 	}
 
-	pub fn emit(&mut self) -> Vec<u8> {
-		self.module.emit_wasm()
+	pub fn func(&mut self) -> &mut walrus::LocalFunction {
+		// TODO consider if we need mut for func
+		self.module
+			.get_mut()
+			.funcs
+			.get_mut(self.func)
+			.kind
+			.unwrap_local_mut()
+	}
+
+	pub fn emit(&self) -> Vec<u8> {
+		self.module.borrow_mut().emit_wasm()
 	}
 }
 
@@ -65,6 +86,32 @@ impl Genome for WasmGenome {
 
 	fn fitness(&self) -> f64 {
 		self.fitness
+	}
+}
+
+impl Clone for WasmGenome {
+	fn clone(&self) -> Self {
+		WasmGenome::from_binary(&self.emit()).unwrap() // emitted module should be valid
+	}
+}
+
+impl std::fmt::Debug for WasmGenome {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("WasmGenome")
+			.field("func", &self.func)
+			// .field("markers", &self.markers)
+			.field("fitness", &self.fitness)
+			.finish()
+	}
+}
+
+impl std::fmt::Display for WasmGenome {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("Genome[")?;
+		for b in self.emit() {
+			write!(f, "{:X}", b)?;
+		}
+		f.write_str("]")
 	}
 }
 
@@ -87,8 +134,8 @@ impl Agent {
 impl<P> Solution<P> for Agent
 where
 	P: Problem,
-	P::In: WasmTy,
-	P::Out: WasmTy,
+	P::In: WasmParams,
+	P::Out: WasmResults,
 {
 	fn exec(&self, args: P::In) -> P::Out {
 		let linker = Linker::new(&self.engine);
@@ -151,26 +198,39 @@ where
 	P: Problem + Sync,
 	M: Mutator<WasmGenome, Context>,
 	S: Selector<WasmGenome, Context>,
-	P::In: WasmTy,
-	P::Out: WasmTy,
+	P::In: WasmParams,
+	P::Out: WasmResults,
 {
 	pub fn run(&mut self) {
 		self.init();
+
+		let dirname = format!("trial_{}.log", self.seed);
+		fs::create_dir(dirname).unwrap();
+
 		for n in 0..self.num_generations {
+			log::info!("Starting generation {}", self.ctx.borrow().generation);
+
 			self.epoch();
 
 			// TODO logging
+			log::info!("Finished generation {}", self.ctx.borrow().generation);
+			self.ctx.get_mut().generation += 1;
 		}
 	}
 
 	fn init(&mut self) {
-		let params = &[ValType::I32]; // hardcoded for now, TODO fix
+		let params = &[ValType::I32, ValType::I32, ValType::I32]; // hardcoded for now, TODO fix
 		let result = &[ValType::I32];
 		for i in 0..self.pop_size {
 			let mut wg = WasmGenome::new(params, result);
 			wg = self.init_genome.mutate(self.ctx.get_mut(), wg);
 			self.pop.push(wg);
 		}
+		// log::info!("Genome 1 is {:?}", self.pop[0]);
+		// self.pop[0]
+		// 	.module
+		// 	.get_mut()
+		// 	.emit_wasm_file("./genome_init.wasm");
 	}
 }
 
@@ -179,70 +239,81 @@ where
 	P: Problem + Sync,
 	M: Mutator<WasmGenome, Context>,
 	S: Selector<WasmGenome, Context>,
-	P::In: WasmTy,
-	P::Out: WasmTy,
+	P::In: WasmParams,
+	P::Out: WasmResults,
 {
 	type G = WasmGenome;
 
 	fn epoch(&mut self) {
 		self.evaluate();
 
-		self.ctx.get_mut().generation += 1;
-		todo!()
-		/*
-		self.evaluate();
-		// self.pop
-		// 	.sort_unstable_by(|a, b| f64::partial_cmp(&a.fitness, &b.fitness).unwrap()); // from now on, we're sorted
+		self.pop
+			.sort_unstable_by(|a, b| f64::partial_cmp(&a.fitness, &b.fitness).unwrap());
 
-		let mut nextgen = Vec::with_capacity(self.pop_size);
-		let selected = self.select(); // Selection
+		log::info!("Population:");
+		for p in &self.pop {
+			log::info!("\t{} <-- {:?}", p.fitness, p.emit());
+		}
+		let filename = format!(
+			"trial_{}.log/gen_{}.wasm",
+			self.seed,
+			self.ctx.borrow().generation
+		);
+		self.pop[0]
+			.module
+			.get_mut()
+			.emit_wasm_file(filename)
+			.unwrap();
 
-		// TODO elitism, skip all
+		let mut nextgen: Vec<WasmGenome> = Vec::with_capacity(self.pop_size);
+
+		let elitism_cnt = (self.elitism_rate * (self.pop_size as f64)) as usize;
+		if self.enable_elitism {
+			log::info!("Passing {elitism_cnt} elites to next generation.");
+			for i in 0..elitism_cnt {
+				nextgen.push(self.pop[i].clone());
+			}
+		}
+
+		// TODO extract selection
+		// self.selection.select(self.ctx.get_mut(), &self.pop)
+		let mut selected: Vec<WasmGenome> = mem::take(&mut self.pop) // pop empty after selection
+			.into_iter()
+			.choose_multiple(&mut self.ctx.get_mut().rng, self.pop_size - nextgen.len());
+		log::info!(
+			"Selected {} genomes from current population.",
+			selected.len()
+		);
 
 		if self.enable_crossover {
-			// Crossover
-			let mut rng = self.rng.borrow_mut();
-			while nextgen.len() < nextgen.capacity() {
-				let a = *selected.iter().choose(&mut *rng).unwrap();
-				let b = *selected.iter().choose(&mut *rng).unwrap();
-				nextgen.push(self.crossover(&self.pop[a], &self.pop[b]));
-			}
+			let crossover_cnt = (self.crossover_rate * (self.pop_size as f64)) as usize;
+			todo!() // TODO crossover selected
 		} else {
-			for (i, v) in mem::take(&mut self.pop).into_iter().enumerate() {
-				if selected.contains(&i) {
-					nextgen.push(v)
-				}
-			}
+			nextgen.append(&mut selected);
 		}
 
 		// Mutation
-		// for gn in &mut nextgen {
-		// 	*gn = self.mutate(mem::take(gn));
-		// }
-
-		// if no crossover, then must fill to cap with mutated variants
-		while nextgen.len() < nextgen.capacity() {
-			let indiv = {
-				let mut rng = self.rng.borrow_mut();
-				(*nextgen.choose(&mut *rng).unwrap())
-			};
-			nextgen.push(self.mutate(indiv));
+		if self.enable_elitism {
+			self.pop = nextgen.drain(0..elitism_cnt).collect();
 		}
+		log::info!("Mutating {} genomes.", nextgen.len());
+		nextgen = nextgen.into_iter().map(|g| self.mutate(g)).collect(); // OPT- collect into pop directly? rust stupid
 
-		self.pop = nextgen;
-		 */
+		// Add to next generation!
+		self.pop.append(&mut nextgen);
 	}
 
 	fn evaluate(&mut self) {
+		// NOTE: we may not actually need self.agents here lol...
 		self.agents = self
 			.pop
-			.iter_mut() // OPT can I par_iter here?
+			.iter() // OPT can I par_iter here?
 			.map(WasmGenome::emit)
 			.map(|b| Agent::new(self.engine.clone(), &b))
 			.collect();
 		let fitnai: Vec<_> = self
 			.agents
-			.par_iter()
+			.iter()
 			.map(|a| self.problem.fitness(a))
 			.collect();
 		for (g, f) in Iterator::zip(self.pop.iter_mut(), fitnai) {
@@ -252,6 +323,7 @@ where
 
 	fn mutate(&self, indiv: Self::G) -> Self::G {
 		let mut ctx = self.ctx.borrow_mut();
+		log::info!("MUTATING {indiv}");
 		self.mutation.mutate(&mut *ctx, indiv)
 	}
 

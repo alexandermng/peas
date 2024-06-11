@@ -137,6 +137,7 @@ fn main() -> walrus::Result<()> {
 
 	// Emit the `.wasm` binary to the `target/out.wasm` file.
 	module.emit_wasm_file("target/factorial.wasm")?;
+	module.emit_wasm_file("target/factorial2.wasm")?;
 
 	module.write_graphviz_dot("target/factorial.dot")?;
 
