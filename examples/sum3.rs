@@ -8,7 +8,10 @@ use peas::{
 	selection::TournamentSelection,
 	Context, WasmGABuilder,
 };
-use rand::{thread_rng, Rng};
+use rand::{
+	distributions::{Distribution, Uniform},
+	thread_rng, Rng,
+};
 use walrus::FunctionBuilder;
 
 struct Sum3 {
@@ -43,15 +46,19 @@ impl Problem for Sum3 {
 // 	}
 // }
 
+fn gen_tests(num: usize) -> Vec<((i32, i32, i32), i32)> {
+	let rng = &mut thread_rng();
+	let dist = Uniform::new(-256, 256);
+	(0..num)
+		.map(|_| (dist.sample(rng), dist.sample(rng), dist.sample(rng)))
+		.map(|arg| (arg, (arg.0 + arg.1 + arg.2)))
+		.collect()
+}
+
 fn main() {
 	pretty_env_logger::init();
 
-	let tests = vec![
-		((1, 3, 3), 7),
-		((2, 3, 9), 14),
-		((0, 1, 0), 1),
-		((0, -1, 3), 2),
-	];
+	let tests = gen_tests(1000);
 	let prob = Sum3 { tests };
 	let seed: u64 = thread_rng().gen();
 	let muts: [&dyn Mutator<_, _>; 2] = [
@@ -65,7 +72,7 @@ fn main() {
 	];
 	let mut ga = WasmGABuilder::default()
 		.problem(prob)
-		.pop_size(5)
+		.pop_size(100)
 		.generations(10)
 		.selection(TournamentSelection { k: 3, p: 0.9 })
 		.enable_elitism(true)

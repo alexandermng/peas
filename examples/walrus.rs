@@ -29,12 +29,13 @@
 //! main();
 //! ```
 
-use walrus::ir::*;
+use walrus::{ir::*, CustomSection};
 use walrus::{FunctionBuilder, Module, ModuleConfig, ValType};
 
 fn main() -> walrus::Result<()> {
 	// Construct a new Walrus module.
-	let config = ModuleConfig::new();
+	let mut config = ModuleConfig::new();
+	config.generate_producers_section(true);
 	let mut module = Module::with_config(config);
 
 	// Import the `log` function.
@@ -134,6 +135,19 @@ fn main() -> walrus::Result<()> {
 		let fact = module.funcs.get_mut(factorial_id).kind.unwrap_local_mut();
 		fact.builder_mut().func_body().local_get(n).drop();
 	}
+
+	// Add custom!
+	#[derive(Debug)]
+	struct Tag(&'static str);
+	impl CustomSection for Tag {
+		fn name(&self) -> &str {
+			"tag"
+		}
+		fn data(&self, ids_to_indices: &walrus::IdsToIndices) -> std::borrow::Cow<[u8]> {
+			std::borrow::Cow::Borrowed(self.0.as_bytes())
+		}
+	}
+	module.customs.add(Tag("wally"));
 
 	// Emit the `.wasm` binary to the `target/out.wasm` file.
 	module.emit_wasm_file("target/factorial.wasm")?;
