@@ -14,7 +14,9 @@ pub trait GenAlg {
 	/// 2. Selection
 	/// 3. Crossover, if enabled
 	/// 4. Mutation
-	fn epoch(&mut self);
+	///
+	/// Returns whether the algorithm should continue (ie. false if stop condition was triggered).
+	fn epoch(&mut self) -> bool;
 
 	// Evaluates the population against the given problem/simulation, updating fitnesses.
 	fn evaluate(&mut self);
@@ -57,17 +59,87 @@ pub trait Solution<P: Problem>: Sync {
 	fn exec(&self, args: P::In) -> P::Out;
 }
 
-/// The selection operator in a Genetic Algorithm
+/// The selection operator in a Genetic Algorithm. To be called once per generation, with optional
+/// parameter variation after evaluation each generation.
 pub trait Selector<G: Genome, C> {
 	fn select(&self, ctx: &mut C, pop: Vec<G>) -> Vec<G>;
+	fn vary_params(&mut self, ctx: &mut C, pop: &[G]) {}
 }
 
-/// The mutation operator in a Genetic Algorithm
+/// The mutation operator in a Genetic Algorithm. Called per-individual, with optional parameter
+/// variation after evaluation each generation.
 pub trait Mutator<G: Genome, C> {
 	fn mutate(&self, ctx: &mut C, indiv: G) -> G;
+	fn vary_params(&mut self, ctx: &mut C, pop: &[G]) {}
 }
 
-/// The crossover operator in a Genetic Algorithm
+/// The crossover operator in a Genetic Algorithm. Called per-pair, with optional parameter variation
+/// after evaluation each generation.
 pub trait Recombiner<G: Genome, C> {
 	fn crossover(&self, ctx: &mut C, par_a: G, par_b: &G) -> G;
+	fn vary_params(&mut self, ctx: &mut C, pop: &[G]) {}
+}
+
+/// View and determine something about a Genetic Algorithm. Used for stop conditions.
+pub trait Predicate<G: Genome, C> {
+	fn test(&mut self, ctx: &mut C, pop: &[G]) -> bool;
+}
+
+/// View the Genetic Algorithm in-progress. Used for logging.
+pub trait Peeker<G: Genome, C> {
+	fn peek(&mut self, ctx: &mut C, pop: &[G]);
+}
+
+/***** Blanket Impls *****/
+
+/* bleh, no specialization... */
+
+// impl<T, C, G> Selector<G, C> for T
+// where
+// 	G: Genome,
+// 	T: Fn(&mut C, Vec<G>) -> Vec<G>,
+// {
+// 	fn select(&self, ctx: &mut C, pop: Vec<G>) -> Vec<G> {
+// 		(self)(ctx, pop)
+// 	}
+// }
+
+// impl<T, C, G> Mutator<G, C> for T
+// where
+// 	G: Genome,
+// 	T: Fn(&mut C, G) -> G,
+// {
+// 	fn mutate(&self, ctx: &mut C, indiv: G) -> G {
+// 		(self)(ctx, indiv)
+// 	}
+// }
+
+// impl<T, C, G> Recombiner<G, C> for T
+// where
+// 	G: Genome,
+// 	T: Fn(&mut C, G, &G) -> G,
+// {
+// 	fn crossover(&self, ctx: &mut C, par_a: G, par_b: &G) -> G {
+// 		(self)(ctx, par_a, par_b)
+// 	}
+// }
+
+impl<T, C, G> Predicate<G, C> for T
+where
+	G: Genome,
+	T: FnMut(&mut C, &[G]) -> bool,
+{
+	fn test(&mut self, ctx: &mut C, pop: &[G]) -> bool {
+		(self)(ctx, pop)
+	}
+}
+
+impl<T, C, G> Peeker<G, C> for T
+where
+	G: Genome,
+	T: FnMut(&mut C, &[G]),
+{
+	fn peek(&mut self, ctx: &mut C, pop: &[G]) {
+		(self)(ctx, pop);
+	}
 }

@@ -19,13 +19,16 @@ impl Mutator<WasmGenome, Context> for NeutralAddOp {
 		let unif = Uniform::new(1, indiv.func().size() as usize + 1);
 		let loc = unif.sample(&mut ctx.rng); // chosen mutation location
 
-		static ALLOWED_OPS: [(BinaryOp, Value); 5] = [
+		static ALLOWED_OPS: [(BinaryOp, Value); 8] = [
 			// (Operation, Identity constant)
 			(BinaryOp::I32Add, Value::I32(0)),  // + 0
 			(BinaryOp::I32Sub, Value::I32(0)),  // - 0
 			(BinaryOp::I32Mul, Value::I32(1)),  // * 1
 			(BinaryOp::I32DivS, Value::I32(1)), // ÷ 1
 			(BinaryOp::I32RemS, Value::I32(1)), // % 1
+			(BinaryOp::I32And, Value::I32(-1i32)), // & 0xffffffff
+			(BinaryOp::I32Or, Value::I32(0)),   // | 0x00000000
+			(BinaryOp::I32Xor, Value::I32(0)),  // ^ 0x00000000
 
 			                                    // ...etc
 		];

@@ -6,7 +6,7 @@ use peas::{
 	genetic::{Mutator, Problem, Solution},
 	mutations::{NeutralAddOp, Rated, SequenceMutator, SwapRoot},
 	selection::TournamentSelection,
-	Context, WasmGABuilder,
+	Context, WasmGABuilder, WasmGenome,
 };
 use rand::{
 	distributions::{Distribution, Uniform},
@@ -74,6 +74,9 @@ fn main() {
 		.problem(prob)
 		.pop_size(100)
 		.generations(10)
+		.stop_condition(Box::new(|ctx: &mut Context, _: &[WasmGenome]| -> bool {
+			ctx.max_fitness >= 1.0
+		}))
 		.selection(TournamentSelection::new(0.8, 3, 0.9, false)) // can do real tournament selection when selection is fixed
 		.enable_elitism(true)
 		.elitism_rate(0.05)

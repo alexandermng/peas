@@ -8,6 +8,7 @@ pub mod selection;
 use std::{borrow::BorrowMut, cell::RefCell, collections::HashSet, fs, mem};
 
 use eyre::{eyre, OptionExt, Result};
+use genetic::Predicate;
 use rand::{
 	seq::{IteratorRandom, SliceRandom},
 	Rng, SeedableRng,
@@ -70,8 +71,10 @@ where
 }
 
 pub struct Context {
-	pub generation: usize,
-	pub(crate) rng: Pcg64Mcg,
+	pub generation: usize,    // current generation
+	pub max_fitness: f64,     // current top fitness
+	pub avg_fitness: f64,     // current mean fitness
+	pub(crate) rng: Pcg64Mcg, // reproducible rng
 }
 
 /// A genetic algorithm for synthesizing WebAssembly modules.
@@ -93,14 +96,14 @@ where
 	mutation_rate: f64,
 	mutation: M,
 	init_genome: Box<dyn Mutator<WasmGenome, Context>>,
-	num_generations: usize,
+	stop_cond: Box<dyn Predicate<WasmGenome, Context>>,
+	num_generations: usize, // maximum generations to go
 	seed: u64,
 
 	// Runtime use
 	engine: Engine,
 	ctx: RefCell<Context>,
 	pop: Vec<WasmGenome>, // population of genomes
-	agents: Vec<Agent>,   // corresponding agents
 }
 
 impl<P, M, S> WasmGA<P, M, S>
@@ -118,19 +121,9 @@ where
 		fs::create_dir(dirname).unwrap();
 
 		for n in 0..self.num_generations {
-			log::info!("Starting generation {}.", self.ctx.borrow().generation);
-
-			self.epoch();
-
-			// TODO logging hooks
-			log::info!(
-				"Finished generation {} ({} individuals).",
-				self.ctx.borrow().generation,
-				self.pop.len()
-			);
-			self.ctx.get_mut().generation += 1;
-
-			// TODO end condition / max fitness
+			if !self.epoch() {
+				break;
+			}
 		}
 	}
 
@@ -155,28 +148,51 @@ where
 {
 	type G = WasmGenome;
 
-	fn epoch(&mut self) {
+	fn epoch(&mut self) -> bool {
+		log::info!("Evaluating generation {}.", self.ctx.borrow().generation);
 		self.evaluate();
 
 		self.pop
 			.sort_unstable_by(|a, b| f64::partial_cmp(&b.fitness, &a.fitness).unwrap());
 
-		log::info!("Top 10:");
-		for p in self.pop.iter().take(10) {
-			log::info!("\t{} <-- {}", p.fitness, p);
-		}
-		let filename = format!(
-			"trial_{}.log/gen_{}.wasm",
-			self.seed,
-			self.ctx.borrow().generation
-		);
-		self.pop[0]
-			.module
-			.get_mut()
-			.emit_wasm_file(filename)
-			.unwrap();
+		{
+			let mut ctx = self.ctx.borrow_mut();
+			let pop = &self.pop[..]; // read-only, guaranteed for hooks to be sorted by fitness
 
-		let mut nextgen: Vec<WasmGenome> = Vec::with_capacity(self.pop_size);
+			// Update context stats
+			ctx.max_fitness = pop[0].fitness;
+			ctx.avg_fitness = pop.iter().map(WasmGenome::fitness).sum::<f64>() / (pop.len() as f64);
+
+			// Logging
+			log::info!("Average Fitness: {}", ctx.avg_fitness);
+			log::info!("Top 10:");
+			for p in self.pop.iter().take(10) {
+				log::info!("\t{} <-- {}", p.fitness, p);
+			}
+			let filename = format!("trial_{}.log/gen_{}.wasm", self.seed, ctx.generation);
+			pop[0] // best
+				.module
+				.borrow_mut()
+				.emit_wasm_file(filename) // still dont know why this is mut tbh
+				.unwrap();
+			// TODO logging hook
+
+			// Test stop condition
+			if self.stop_cond.test(&mut ctx, pop) {
+				log::info!("Stop condition met, exiting.");
+				return false;
+			}
+
+			// Update parameters for next generation
+			ctx.generation += 1;
+			self.selection.vary_params(&mut ctx, pop);
+			self.mutation.vary_params(&mut ctx, pop);
+			// self.crossover.vary_params(&mut ctx, pop);
+
+			log::info!("Creating generation {}.", ctx.generation);
+		}
+
+		let mut nextgen: Vec<Self::G> = Vec::with_capacity(self.pop_size);
 
 		let elitism_cnt = (self.elitism_rate * (self.pop_size as f64)) as usize;
 		if self.enable_elitism {
@@ -225,21 +241,24 @@ where
 
 		// Add to next generation!
 		self.pop.append(&mut nextgen);
+		assert!(self.pop.len() == self.pop_size, "should be fully populated");
+
+		log::info!(
+			"Created generation {} (size {}).",
+			self.ctx.get_mut().generation,
+			self.pop_size
+		);
+		true
 	}
 
 	fn evaluate(&mut self) {
-		// NOTE: we may not actually need self.agents here lol...
-		self.agents = self
+		let agents: Vec<_> = self
 			.pop
-			.iter() // OPT can I par_iter here?
+			.iter() // OPT can I par_iter here? I think I need WasmGenome: Send / Sync
 			.map(WasmGenome::emit)
 			.map(|b| Agent::new(self.engine.clone(), &b))
 			.collect();
-		let fitnai: Vec<_> = self
-			.agents
-			.par_iter()
-			.map(|a| self.problem.fitness(a))
-			.collect();
+		let fitnai: Vec<_> = agents.par_iter().map(|a| self.problem.fitness(a)).collect();
 		for (g, f) in Iterator::zip(self.pop.iter_mut(), fitnai) {
 			g.fitness = f;
 		}
@@ -281,6 +300,7 @@ where
 	mutation_rate: Option<f64>,
 	mutation: Option<M>,
 	starter: Option<Box<dyn Mutator<WasmGenome, Context>>>,
+	stop_cond: Option<Box<dyn Predicate<WasmGenome, Context>>>,
 	generations: Option<usize>,
 	seed: Option<u64>,
 }
@@ -299,12 +319,15 @@ where
 			pop_size: size,
 			selection: self.selection.unwrap(),
 			enable_elitism: self.enable_elitism.unwrap(),
-			elitism_rate: self.elitism_rate.unwrap(),
+			elitism_rate: self.elitism_rate.unwrap_or_default(), // optional
 			enable_crossover: self.enable_crossover.unwrap(),
-			crossover_rate: self.crossover_rate.unwrap(),
+			crossover_rate: self.crossover_rate.unwrap_or_default(), // optional
 			mutation_rate: self.mutation_rate.unwrap(),
 			mutation: self.mutation.unwrap(),
 			init_genome: self.starter.unwrap(),
+			stop_cond: self
+				.stop_cond
+				.unwrap_or_else(|| Box::new(|_: &mut Context, _: &[WasmGenome]| true)), // optional
 			num_generations: self.generations.unwrap(),
 			seed,
 
@@ -312,10 +335,11 @@ where
 			engine: Engine::default(),
 			ctx: RefCell::new(Context {
 				generation: 0,
+				max_fitness: 0.0,
+				avg_fitness: 0.0,
 				rng: <Pcg64Mcg as SeedableRng>::seed_from_u64(seed),
 			}),
 			pop: Vec::with_capacity(size),
-			agents: Vec::with_capacity(size),
 		}
 	}
 
@@ -369,6 +393,11 @@ where
 		self
 	}
 
+	pub fn stop_condition(mut self, pred: Box<dyn Predicate<WasmGenome, Context>>) -> Self {
+		self.stop_cond = Some(pred);
+		self
+	}
+
 	pub fn generations(mut self, gens: usize) -> Self {
 		self.generations = Some(gens);
 		self
@@ -392,12 +421,13 @@ where
 			pop_size: None,
 			selection: None,
 			enable_elitism: None,
-			elitism_rate: Some(0.0),
+			elitism_rate: None,
 			enable_crossover: None,
-			crossover_rate: Some(0.0),
+			crossover_rate: None,
 			mutation_rate: None,
 			mutation: None,
 			starter: None,
+			stop_cond: None,
 			generations: None,
 			seed: None,
 		}
