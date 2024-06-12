@@ -111,8 +111,8 @@ fn main() -> walrus::Result<()> {
 
 	struct Printer;
 	impl<'i> Visitor<'i> for Printer {
-		fn visit_instr(&mut self, instr: &'i Instr, _instr_loc: &'i InstrLocId) {
-			println!("Came across {instr:?}");
+		fn visit_instr(&mut self, instr: &'i Instr, loc: &'i InstrLocId) {
+			println!("Came across {instr:?}\tat {loc:?}");
 		}
 	}
 	impl VisitorMut for Printer {

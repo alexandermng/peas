@@ -7,12 +7,14 @@ use walrus::{CustomSection, FunctionBuilder, ValType};
 
 use crate::genetic::Genome;
 
+pub type InnovNum = usize;
+
 /// The genome of a Wasm agent/individual, with additional genetic data. Can generate a Wasm Agent: bytecode whose
 /// phenotype is the solution for a particular problem.
 pub struct WasmGenome {
 	pub(crate) module: RefCell<walrus::Module>, // in progress module
 	pub(crate) func: walrus::FunctionId,        // mutatable main (LocalFunction) in module
-	pub(crate) markers: Vec<usize>,             // markers for main, by instruction
+	pub(crate) markers: Vec<InnovNum>,          // markers for main, by instruction
 
 	pub fitness: f64,
 }
@@ -34,7 +36,7 @@ impl WasmGenome {
 		WasmGenome {
 			module: RefCell::new(module),
 			func,
-			markers: vec![], // TODO consider type
+			markers: vec![],
 			fitness: 0.0,
 		}
 	}
@@ -55,13 +57,17 @@ impl WasmGenome {
 	}
 
 	pub fn func(&mut self) -> &mut walrus::LocalFunction {
-		// TODO consider if we need mut for func
 		self.module
 			.get_mut()
 			.funcs
 			.get_mut(self.func)
 			.kind
 			.unwrap_local_mut()
+	}
+
+	/// Retrieve the local position by global innovation number.
+	pub fn get_instr(&self, inno: InnovNum) -> usize {
+		self.markers.iter().position(|&i| i == inno).unwrap()
 	}
 
 	pub fn emit(&self) -> Vec<u8> {

@@ -12,6 +12,7 @@ use rand::{
 	distributions::{Distribution, Uniform},
 	thread_rng, Rng,
 };
+use rayon::prelude::*;
 use walrus::FunctionBuilder;
 
 struct Sum3 {
@@ -73,7 +74,7 @@ fn main() {
 	let mut ga = WasmGABuilder::default()
 		.problem(prob)
 		.pop_size(100)
-		.generations(10)
+		.generations(20)
 		.stop_condition(Box::new(|ctx: &mut Context, _: &[WasmGenome]| -> bool {
 			ctx.max_fitness >= 1.0
 		}))

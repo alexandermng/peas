@@ -14,7 +14,6 @@ For each example problem, we define `OurProblem` and implement it as a `Problem`
 ## TODO
 
 - fix mutation rates
-- fix selection
 - uhh... historical markers (!!)
 - rework Solutions for RL / simulation-based fitness w/ timesteps
 - store graph representation?? how to detect valid

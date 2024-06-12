@@ -5,10 +5,19 @@ pub mod genome;
 pub mod mutations;
 pub mod selection;
 
-use std::{borrow::BorrowMut, cell::RefCell, collections::HashSet, fs, mem};
+use std::{
+	any::Any,
+	borrow::BorrowMut,
+	cell::RefCell,
+	collections::{HashMap, HashSet},
+	fs,
+	hash::{DefaultHasher, Hash, Hasher},
+	mem,
+};
 
-use eyre::{eyre, OptionExt, Result};
+use eyre::{eyre, DefaultHandler, OptionExt, Result};
 use genetic::Predicate;
+use genome::InnovNum;
 use rand::{
 	seq::{IteratorRandom, SliceRandom},
 	Rng, SeedableRng,
@@ -70,11 +79,93 @@ where
 	}
 }
 
+#[derive(Debug)]
+struct InnovKey(InnovNum, walrus::ir::Instr);
+impl PartialEq for InnovKey {
+	fn eq(&self, other: &Self) -> bool {
+		let mut me = DefaultHasher::new();
+		let mut them = me.clone();
+		self.hash(&mut me);
+		other.hash(&mut them);
+		me.finish() == them.finish()
+		// ehhhh we hope here :pray:
+	}
+}
+impl Eq for InnovKey {}
+impl Hash for InnovKey {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		self.0.hash(state);
+		mem::discriminant(&self.1).hash(state);
+		use walrus::ir;
+		use walrus::ir::Instr::*;
+		match self.1 {
+			Binop(ir::Binop { op }) => mem::discriminant(&op).hash(state),
+			Unop(ir::Unop { op }) => mem::discriminant(&op).hash(state),
+			Const(ir::Const { value }) => {
+				mem::discriminant(&value).hash(state);
+				use ir::Value::*;
+				match value {
+					I32(v) => v.hash(state),
+					I64(v) => v.hash(state),
+					F32(v) => v.to_le_bytes().hash(state),
+					F64(v) => v.to_le_bytes().hash(state),
+					V128(v) => v.hash(state),
+				}
+			}
+			LocalGet(ir::LocalGet { local }) => local.hash(state),
+			LocalSet(ir::LocalSet { local }) => local.hash(state),
+			LocalTee(ir::LocalTee { local }) => local.hash(state),
+			GlobalGet(ir::GlobalGet { global }) => global.hash(state),
+			GlobalSet(ir::GlobalSet { global }) => global.hash(state),
+			Load(ir::Load { memory, kind, arg }) => {
+				mem::discriminant(&kind).hash(state);
+				memory.hash(state);
+				arg.align.hash(state);
+				arg.offset.hash(state);
+			}
+			_ => todo!("no hashy for you"), // this is so stupid
+		};
+	}
+}
+
+#[derive(Debug)]
 pub struct Context {
-	pub generation: usize,    // current generation
-	pub max_fitness: f64,     // current top fitness
-	pub avg_fitness: f64,     // current mean fitness
-	pub(crate) rng: Pcg64Mcg, // reproducible rng
+	pub generation: usize, // current generation
+	pub max_fitness: f64,  // current top fitness
+	pub avg_fitness: f64,  // current mean fitness
+
+	pub(crate) rng: Pcg64Mcg,                // reproducible rng
+	innov_cnt: InnovNum,                     // innovation number count
+	cur_innovs: HashMap<InnovKey, InnovNum>, // running log of current unique innovations, cleared per-generation.
+}
+
+impl Context {
+	pub fn new(seed: u64) -> Self {
+		Self {
+			generation: 0,
+			max_fitness: 0.0,
+			avg_fitness: 0.0,
+			rng: Pcg64Mcg::seed_from_u64(seed),
+			innov_cnt: 0,
+			cur_innovs: HashMap::new(),
+		}
+	}
+
+	/// Get or assign an innovation number to an innovation keyed by location of mutation and instruction added
+	pub fn innov(&mut self, loc: InnovNum, instr: walrus::ir::Instr) -> InnovNum {
+		*self
+			.cur_innovs
+			.entry(InnovKey(loc, instr))
+			.or_insert_with(|| {
+				let out = self.innov_cnt;
+				self.innov_cnt += 1;
+				out
+			})
+	}
+
+	pub fn num_innovs(&self) -> InnovNum {
+		self.innov_cnt
+	}
 }
 
 /// A genetic algorithm for synthesizing WebAssembly modules.
@@ -115,16 +206,13 @@ where
 	P::Out: WasmResults,
 {
 	pub fn run(&mut self) {
+		log::info!("Beginning GA trial with seed {}", self.seed);
 		self.init();
 
 		let dirname = format!("trial_{}.log", self.seed);
 		fs::create_dir(dirname).unwrap();
 
-		for n in 0..self.num_generations {
-			if !self.epoch() {
-				break;
-			}
-		}
+		while self.epoch() {}
 	}
 
 	fn init(&mut self) {
@@ -179,7 +267,17 @@ where
 
 			// Test stop condition
 			if self.stop_cond.test(&mut ctx, pop) {
-				log::info!("Stop condition met, exiting.");
+				log::info!(
+					"Stop condition met, exiting. Results are in trial_{}.log/",
+					self.seed
+				);
+				return false;
+			} else if ctx.generation >= self.num_generations {
+				log::info!(
+					"Completed {} generations. Results are in trial_{}.log/",
+					ctx.generation,
+					self.seed
+				);
 				return false;
 			}
 
@@ -333,12 +431,7 @@ where
 
 			// Runtime use
 			engine: Engine::default(),
-			ctx: RefCell::new(Context {
-				generation: 0,
-				max_fitness: 0.0,
-				avg_fitness: 0.0,
-				rng: <Pcg64Mcg as SeedableRng>::seed_from_u64(seed),
-			}),
+			ctx: RefCell::new(Context::new(seed)),
 			pop: Vec::with_capacity(size),
 		}
 	}
