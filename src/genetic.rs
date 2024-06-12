@@ -94,35 +94,35 @@ pub trait Peeker<G: Genome, C> {
 
 /* bleh, no specialization... */
 
-// impl<T, C, G> Selector<G, C> for T
-// where
-// 	G: Genome,
-// 	T: Fn(&mut C, Vec<G>) -> Vec<G>,
-// {
-// 	fn select(&self, ctx: &mut C, pop: Vec<G>) -> Vec<G> {
-// 		(self)(ctx, pop)
-// 	}
-// }
+impl<T, C, G> Selector<G, C> for T
+where
+	G: Genome,
+	T: Fn(&mut C, Vec<G>) -> Vec<G>,
+{
+	fn select(&self, ctx: &mut C, pop: Vec<G>) -> Vec<G> {
+		(self)(ctx, pop)
+	}
+}
 
-// impl<T, C, G> Mutator<G, C> for T
-// where
-// 	G: Genome,
-// 	T: Fn(&mut C, G) -> G,
-// {
-// 	fn mutate(&self, ctx: &mut C, indiv: G) -> G {
-// 		(self)(ctx, indiv)
-// 	}
-// }
+impl<T, C, G> Mutator<G, C> for T
+where
+	G: Genome,
+	T: Fn(&mut C, G) -> G,
+{
+	fn mutate(&self, ctx: &mut C, indiv: G) -> G {
+		(self)(ctx, indiv)
+	}
+}
 
-// impl<T, C, G> Recombiner<G, C> for T
-// where
-// 	G: Genome,
-// 	T: Fn(&mut C, G, &G) -> G,
-// {
-// 	fn crossover(&self, ctx: &mut C, par_a: G, par_b: &G) -> G {
-// 		(self)(ctx, par_a, par_b)
-// 	}
-// }
+impl<T, C, G> Recombiner<G, C> for T
+where
+	G: Genome,
+	T: Fn(&mut C, G, &G) -> G,
+{
+	fn crossover(&self, ctx: &mut C, par_a: G, par_b: &G) -> G {
+		(self)(ctx, par_a, par_b)
+	}
+}
 
 impl<T, C, G> Predicate<G, C> for T
 where

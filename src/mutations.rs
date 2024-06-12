@@ -7,7 +7,7 @@ use rand::{
 	Rng,
 };
 use walrus::{
-	ir::{BinaryOp, Const, Instr, LocalGet, Value},
+	ir::{self, dfs_in_order, BinaryOp, Const, Instr, LocalGet, Value, Visitor},
 	FunctionBuilder,
 };
 
@@ -16,35 +16,54 @@ use crate::{genetic::Mutator, Context, WasmGenome};
 pub struct NeutralAddOp;
 impl Mutator<WasmGenome, Context> for NeutralAddOp {
 	fn mutate(&self, ctx: &mut Context, mut indiv: WasmGenome) -> WasmGenome {
+		struct Cataloguer(Vec<()>);
+		impl<'instr> Visitor<'instr> for Cataloguer {
+			fn visit_instr(&mut self, instr: &'instr Instr, instr_loc: &'instr walrus::InstrLocId) {
+				todo!() // todo
+			}
+		}
+		let mut vis = Cataloguer;
+		// dfs_in_order(&mut vis, func, indiv.func().entry_block());
+
 		let unif = Uniform::new(1, indiv.func().size() as usize + 1);
 		let loc = unif.sample(&mut ctx.rng); // chosen mutation location
 
 		static ALLOWED_OPS: [(BinaryOp, Value); 8] = [
 			// (Operation, Identity constant)
-			(BinaryOp::I32Add, Value::I32(0)),  // + 0
-			(BinaryOp::I32Sub, Value::I32(0)),  // - 0
-			(BinaryOp::I32Mul, Value::I32(1)),  // * 1
-			(BinaryOp::I32DivS, Value::I32(1)), // ÷ 1
-			(BinaryOp::I32RemS, Value::I32(1)), // % 1
+			(BinaryOp::I32Add, Value::I32(0)),     // + 0
+			(BinaryOp::I32Sub, Value::I32(0)),     // - 0
+			(BinaryOp::I32Mul, Value::I32(1)),     // * 1
+			(BinaryOp::I32DivS, Value::I32(1)),    // ÷ 1
+			(BinaryOp::I32RemS, Value::I32(1)),    // % 1
 			(BinaryOp::I32And, Value::I32(-1i32)), // & 0xffffffff
-			(BinaryOp::I32Or, Value::I32(0)),   // | 0x00000000
-			(BinaryOp::I32Xor, Value::I32(0)),  // ^ 0x00000000
+			(BinaryOp::I32Or, Value::I32(0)),      // | 0x00000000
+			(BinaryOp::I32Xor, Value::I32(0)),     // ^ 0x00000000
 
-			                                    // ...etc
+			                                       // ...etc
 		];
-		let (op, ident) = ALLOWED_OPS.choose(&mut ctx.rng).unwrap();
+		let (op, ident) = *ALLOWED_OPS.choose(&mut ctx.rng).unwrap();
 
 		log::debug!(
 			"Adding Operation {op:?} at {loc} (within 0..{})",
 			indiv.func().size()
 		);
+		indiv.mark_at(
+			// wtf is this shit
+			loc,
+			ctx.innov(indiv.get_inno(loc), Instr::Const(Const { value: ident })),
+		);
+		indiv.mark_at(
+			loc + 1,
+			ctx.innov(indiv.get_inno(loc + 1), Instr::Binop(ir::Binop { op })),
+		);
 		indiv
 			.func()
 			.builder_mut()
 			.func_body()
-			.const_at(loc, Value::I32(0))
-			.binop_at(loc + 1, BinaryOp::I32Add);
-		// TODO add dangling instr seq and then append to correct location
+			.const_at(loc, ident)
+			.binop_at(loc + 1, op);
+
+		// TODO WE STILL HAVE A PROBLEM. SHIT MOVES AROUND.
 		indiv
 	}
 }
@@ -80,25 +99,13 @@ impl Mutator<WasmGenome, Context> for SwapRoot {
 			indiv.func().block(entry)[loc].0,
 			instr
 		);
+		indiv.mark_at(loc, ctx.innov(indiv.get_inno(loc), instr.clone()));
 		indiv.func().block_mut(entry)[loc].0 = instr;
 		indiv
 	}
 }
 
 /***** UTILITY IMPLS *****/
-
-// TODO mutation sequence; mutation or; (mutation, rate)
-
-/// Blanket Impl for Closures
-impl<T> Mutator<WasmGenome, Context> for T
-where
-	T: Fn(&mut Context, &mut FunctionBuilder),
-{
-	fn mutate(&self, ctx: &mut Context, mut indiv: WasmGenome) -> WasmGenome {
-		self(ctx, indiv.func().builder_mut());
-		indiv
-	}
-}
 
 /// Sequences of mutations
 pub struct SequenceMutator<'a> {

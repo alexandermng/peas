@@ -4,6 +4,7 @@
 
 use peas::{
 	genetic::{Mutator, Problem, Solution},
+	genome::InnovNum,
 	mutations::{NeutralAddOp, Rated, SequenceMutator, SwapRoot},
 	selection::TournamentSelection,
 	Context, WasmGABuilder, WasmGenome,
@@ -13,7 +14,7 @@ use rand::{
 	thread_rng, Rng,
 };
 use rayon::prelude::*;
-use walrus::FunctionBuilder;
+use walrus::{ir, FunctionBuilder};
 
 struct Sum3 {
 	tests: Vec<((i32, i32, i32), i32)>, // input-output pairs
@@ -86,10 +87,23 @@ fn main() {
 		// .crossover()
 		.mutation_rate(1.0)
 		.mutation(SequenceMutator::from(&muts[..]))
-		.init_genome(Box::new(|_ctx: &mut Context, fb: &mut FunctionBuilder| {
-			// starting code for each genome
-			fb.func_body().i32_const(1);
-		}))
+		.init_genome(Box::new(
+			|ctx: &mut Context, mut g: WasmGenome| -> WasmGenome {
+				let fb = g.func().builder_mut();
+				// starting code for each genome
+				fb.func_body().i32_const(0);
+				g.mark_at(
+					0,
+					ctx.innov(
+						InnovNum(0),
+						ir::Instr::Const(ir::Const {
+							value: ir::Value::I32(0),
+						}),
+					),
+				);
+				g
+			},
+		))
 		.seed(seed)
 		.build();
 	ga.run();

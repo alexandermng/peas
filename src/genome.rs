@@ -1,21 +1,43 @@
 //! WebAssembly Genome
 
-use std::cell::RefCell;
+use std::{
+	cell::RefCell,
+	fmt::{Debug, Display},
+	ops::{Deref, DerefMut},
+};
 
 use eyre::{eyre, Result};
 use walrus::{CustomSection, FunctionBuilder, ValType};
 
 use crate::genetic::Genome;
 
-pub type InnovNum = usize;
+/// A global unique id within a Genetic Algorithm
+#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+pub struct InnovNum(pub usize);
+impl Deref for InnovNum {
+	type Target = usize;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+impl DerefMut for InnovNum {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.0
+	}
+}
+impl Display for InnovNum {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		Display::fmt(&self.0, f)
+	}
+}
 
 /// The genome of a Wasm agent/individual, with additional genetic data. Can generate a Wasm Agent: bytecode whose
 /// phenotype is the solution for a particular problem.
 pub struct WasmGenome {
 	pub(crate) module: RefCell<walrus::Module>, // in progress module
 	pub(crate) func: walrus::FunctionId,        // mutatable main (LocalFunction) in module
-	pub(crate) markers: Vec<InnovNum>,          // markers for main, by instruction
-
+	pub(crate) markers: Vec<(usize, InnovNum)>, // markers for main, mapping their local pos to innovation number
+	// TODO WE STILL HAVE A PROBLEM. SHIT MOVES AROUND.
 	pub fitness: f64,
 }
 
@@ -67,7 +89,22 @@ impl WasmGenome {
 
 	/// Retrieve the local position by global innovation number.
 	pub fn get_instr(&self, inno: InnovNum) -> usize {
-		self.markers.iter().position(|&i| i == inno).unwrap()
+		self.markers
+			.iter()
+			.find_map(|&(pos, no)| (inno == no).then_some(pos))
+			.unwrap()
+	}
+
+	pub fn get_inno(&self, pos: usize) -> InnovNum {
+		self.markers
+			.iter()
+			.find_map(|&(po, no)| (pos == po).then_some(no))
+			.unwrap()
+	}
+
+	/// Mark a new innovation (pushed to end)
+	pub fn mark_at(&mut self, pos: usize, inno: InnovNum) {
+		self.markers.push((pos, inno));
 	}
 
 	pub fn emit(&self) -> Vec<u8> {
@@ -100,11 +137,14 @@ impl Genome for WasmGenome {
 
 impl Clone for WasmGenome {
 	fn clone(&self) -> Self {
-		WasmGenome::from_binary(&self.emit()).unwrap() // emitted module should be valid
+		let mut out = WasmGenome::from_binary(&self.emit()).unwrap(); // emitted module should be valid
+		out.markers.clone_from(&self.markers);
+		out.fitness.clone_from(&self.fitness);
+		out
 	}
 }
 
-impl std::fmt::Debug for WasmGenome {
+impl Debug for WasmGenome {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("WasmGenome")
 			.field("func", &self.func)
@@ -114,7 +154,7 @@ impl std::fmt::Debug for WasmGenome {
 	}
 }
 
-impl std::fmt::Display for WasmGenome {
+impl Display for WasmGenome {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.write_str("Genome[")?;
 		for b in self.emit() {

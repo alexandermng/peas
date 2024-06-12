@@ -146,7 +146,7 @@ impl Context {
 			max_fitness: 0.0,
 			avg_fitness: 0.0,
 			rng: Pcg64Mcg::seed_from_u64(seed),
-			innov_cnt: 0,
+			innov_cnt: InnovNum(0),
 			cur_innovs: HashMap::new(),
 		}
 	}
@@ -158,7 +158,7 @@ impl Context {
 			.entry(InnovKey(loc, instr))
 			.or_insert_with(|| {
 				let out = self.innov_cnt;
-				self.innov_cnt += 1;
+				*self.innov_cnt += 1;
 				out
 			})
 	}
@@ -341,11 +341,15 @@ where
 		self.pop.append(&mut nextgen);
 		assert!(self.pop.len() == self.pop_size, "should be fully populated");
 
+		let mut ctx = self.ctx.borrow_mut();
 		log::info!(
-			"Created generation {} (size {}).",
-			self.ctx.get_mut().generation,
-			self.pop_size
+			"Created generation {} (size {}). {} new innovations; {} total innovations.",
+			ctx.generation,
+			self.pop_size,
+			ctx.cur_innovs.len(),
+			ctx.innov_cnt,
 		);
+		ctx.cur_innovs.clear();
 		true
 	}
 
