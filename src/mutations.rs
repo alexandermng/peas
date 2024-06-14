@@ -13,20 +13,69 @@ use walrus::{
 
 use crate::{genetic::Mutator, Context, WasmGenome};
 
-pub struct NeutralAddOp;
-impl Mutator<WasmGenome, Context> for NeutralAddOp {
+/// Mutation by individual genes
+pub trait WasmMutator {
+	/// Finds potential mutations for this genome, as a list of function-local indices.
+	fn find_valids(&self, indiv: &WasmGenome) -> Vec<usize>;
+
+	/// Mutate a gene at a particular index.
+	fn mutate_gene(&self, ctx: &mut Context, indiv: &mut WasmGenome, loc: usize);
+
+	/// Get the rate of mutation for the genome. Should be between 0..=1.
+	fn rate(&self, ctx: &mut Context, indiv: &WasmGenome) -> f64;
+}
+
+impl<M: WasmMutator> Mutator<WasmGenome, Context> for M {
 	fn mutate(&self, ctx: &mut Context, mut indiv: WasmGenome) -> WasmGenome {
-		struct Cataloguer(Vec<()>);
-		impl<'instr> Visitor<'instr> for Cataloguer {
-			fn visit_instr(&mut self, instr: &'instr Instr, instr_loc: &'instr walrus::InstrLocId) {
-				todo!() // todo
+		let entry = indiv.func().entry_block();
+		let valids = self.find_valids(&indiv);
+		let rate = self.rate(ctx, &indiv) / (valids.len() as f64); // rate per-valid-gene
+		let dist = Bernoulli::new(rate).unwrap();
+
+		for loc in valids {
+			if dist.sample(&mut ctx.rng) {
+				self.mutate_gene(ctx, &mut indiv, loc);
 			}
 		}
-		let mut vis = Cataloguer;
-		// dfs_in_order(&mut vis, func, indiv.func().entry_block());
 
-		let unif = Uniform::new(1, indiv.func().size() as usize + 1);
-		let loc = unif.sample(&mut ctx.rng); // chosen mutation location
+		indiv
+	}
+}
+
+pub struct NeutralAddOp;
+impl WasmMutator for NeutralAddOp {
+	fn find_valids(&self, indiv: &WasmGenome) -> Vec<usize> {
+		struct Cataloguer {
+			idx: usize,
+			cata: Vec<usize>,
+		};
+		impl<'instr> Visitor<'instr> for Cataloguer {
+			fn visit_instr(&mut self, instr: &'instr Instr, _: &'instr walrus::InstrLocId) {
+				if self.idx > 0 {
+					self.cata.push(self.idx);
+				}
+				self.idx += 1;
+			}
+		}
+		let mut vis = Cataloguer {
+			idx: 0,
+			cata: vec![],
+		};
+		let entry = indiv.func().entry_block();
+		dfs_in_order(&mut vis, &indiv.func(), entry);
+		todo!()
+	}
+
+	fn rate(&self, ctx: &mut Context, _: &WasmGenome) -> f64 {
+		todo!()
+	}
+
+	fn mutate_gene(&self, ctx: &mut Context, indiv: &mut WasmGenome, loc: usize) {
+		// let unif = Uniform::new(1, indiv.func().size() as usize + 1);
+		// let loc = unif.sample(&mut ctx.rng); // chosen mutation location
+		// let func = indiv.func().block_mut(entry);
+		// func[0]
+		// TODO
 
 		static ALLOWED_OPS: [(BinaryOp, Value); 8] = [
 			// (Operation, Identity constant)
@@ -47,24 +96,21 @@ impl Mutator<WasmGenome, Context> for NeutralAddOp {
 			"Adding Operation {op:?} at {loc} (within 0..{})",
 			indiv.func().size()
 		);
-		indiv.mark_at(
-			// wtf is this shit
-			loc,
-			ctx.innov(indiv.get_inno(loc), Instr::Const(Const { value: ident })),
-		);
-		indiv.mark_at(
-			loc + 1,
-			ctx.innov(indiv.get_inno(loc + 1), Instr::Binop(ir::Binop { op })),
-		);
+		// indiv.mark_at(
+		// 	// wtf is this shit
+		// 	loc,
+		// 	ctx.innov(indiv.get_inno(loc), Instr::Const(Const { value: ident })),
+		// );
+		// indiv.mark_at(
+		// 	loc + 1,
+		// 	ctx.innov(indiv.get_inno(loc + 1), Instr::Binop(ir::Binop { op })),
+		// );
 		indiv
 			.func()
 			.builder_mut()
 			.func_body()
 			.const_at(loc, ident)
 			.binop_at(loc + 1, op);
-
-		// TODO WE STILL HAVE A PROBLEM. SHIT MOVES AROUND.
-		indiv
 	}
 }
 
@@ -99,7 +145,7 @@ impl Mutator<WasmGenome, Context> for SwapRoot {
 			indiv.func().block(entry)[loc].0,
 			instr
 		);
-		indiv.mark_at(loc, ctx.innov(indiv.get_inno(loc), instr.clone()));
+		// indiv.mark_at(loc, ctx.innov(indiv.get_inno(loc), instr.clone()));
 		indiv.func().block_mut(entry)[loc].0 = instr;
 		indiv
 	}
@@ -135,42 +181,42 @@ impl<'a> From<&'a [&'a dyn Mutator<WasmGenome, Context>]> for SequenceMutator<'a
 
 // TODO impl Debug for SequenceMutator
 
-/// Mutation with a fixed probability rate of happening (based on the Bernoulli distribution)
-#[derive(Debug)]
-pub struct Rated<M>
-where
-	M: Mutator<WasmGenome, Context>,
-{
-	pub rate: f64,
-	pub mutator: M,
-	dist: Bernoulli, // distribution
-}
+// /// Mutation with a fixed probability rate of happening (based on the Bernoulli distribution)
+// #[derive(Debug)]
+// pub struct Rated<M>
+// where
+// 	M: Mutator<WasmGenome, Context>,
+// {
+// 	pub rate: f64,
+// 	pub mutator: M,
+// 	dist: Bernoulli, // distribution
+// }
 
-impl<M> Rated<M>
-where
-	M: Mutator<WasmGenome, Context>,
-{
-	/// Create a new Rated Mutation with the given rate. `1.0` will always happen, `0.0` will never happen.
-	/// Panics if `rate > 1.0 || rate < 0.0`.
-	pub fn new(mutator: M, rate: f64) -> Self {
-		let dist = Bernoulli::new(rate).unwrap();
-		Self {
-			rate,
-			mutator,
-			dist,
-		}
-	}
-}
+// impl<M> Rated<M>
+// where
+// 	M: Mutator<WasmGenome, Context>,
+// {
+// 	/// Create a new Rated Mutation with the given rate. `1.0` will always happen, `0.0` will never happen.
+// 	/// Panics if `rate > 1.0 || rate < 0.0`.
+// 	pub fn new(mutator: M, rate: f64) -> Self {
+// 		let dist = Bernoulli::new(rate).unwrap();
+// 		Self {
+// 			rate,
+// 			mutator,
+// 			dist,
+// 		}
+// 	}
+// }
 
-impl<M> Mutator<WasmGenome, Context> for Rated<M>
-where
-	M: Mutator<WasmGenome, Context>,
-{
-	fn mutate(&self, ctx: &mut Context, indiv: WasmGenome) -> WasmGenome {
-		if self.dist.sample(&mut ctx.rng) {
-			self.mutator.mutate(ctx, indiv)
-		} else {
-			indiv
-		}
-	}
-}
+// impl<M> Mutator<WasmGenome, Context> for Rated<M>
+// where
+// 	M: Mutator<WasmGenome, Context>,
+// {
+// 	fn mutate(&self, ctx: &mut Context, indiv: WasmGenome) -> WasmGenome {
+// 		if self.dist.sample(&mut ctx.rng) {
+// 			self.mutator.mutate(ctx, indiv)
+// 		} else {
+// 			indiv
+// 		}
+// 	}
+// }

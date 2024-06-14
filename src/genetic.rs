@@ -1,6 +1,6 @@
 //! Genetic Algorithm Types
 
-use std::collections::HashSet;
+use std::{cell::Cell, collections::HashSet};
 
 use rand::Rng;
 
@@ -90,39 +90,73 @@ pub trait Peeker<G: Genome, C> {
 	fn peek(&mut self, ctx: &mut C, pop: &[G]);
 }
 
+/// Mutator meant to be called only once (noop after). Used for gene initialization.
+pub struct OnceMutator<T> {
+	inner: Cell<Option<T>>,
+}
+
+impl<T> OnceMutator<T> {
+	pub fn new(mutator: T) -> Self {
+		Self {
+			inner: Cell::new(Some(mutator)),
+		}
+	}
+}
+
+impl<T, C, G> Mutator<G, C> for OnceMutator<T>
+where
+	G: Genome,
+	T: FnOnce(&mut C, G) -> G,
+{
+	/// Runs closure on first mutation, and is a no-op on subsequent calls.
+	fn mutate(&self, ctx: &mut C, indiv: G) -> G {
+		if let Some(func) = self.inner.take() {
+			func(ctx, indiv)
+		} else {
+			indiv
+		}
+	}
+}
+
+impl<T> From<T> for OnceMutator<T> {
+	fn from(value: T) -> Self {
+		OnceMutator::new(value)
+	}
+}
+
 /***** Blanket Impls *****/
 
 /* bleh, no specialization... */
 
-impl<T, C, G> Selector<G, C> for T
-where
-	G: Genome,
-	T: Fn(&mut C, Vec<G>) -> Vec<G>,
-{
-	fn select(&self, ctx: &mut C, pop: Vec<G>) -> Vec<G> {
-		(self)(ctx, pop)
-	}
-}
+// impl<T, C, G> Selector<G, C> for T
+// where
+// 	G: Genome,
+// 	T: Fn(&mut C, Vec<G>) -> Vec<G>,
+// {
+// 	fn select(&self, ctx: &mut C, pop: Vec<G>) -> Vec<G> {
+// 		(self)(ctx, pop)
+// 	}
+// }
 
-impl<T, C, G> Mutator<G, C> for T
-where
-	G: Genome,
-	T: Fn(&mut C, G) -> G,
-{
-	fn mutate(&self, ctx: &mut C, indiv: G) -> G {
-		(self)(ctx, indiv)
-	}
-}
+// impl<T, C, G> Mutator<G, C> for T
+// where
+// 	G: Genome,
+// 	T: Fn(&mut C, G) -> G,
+// {
+// 	fn mutate(&self, ctx: &mut C, indiv: G) -> G {
+// 		(self)(ctx, indiv)
+// 	}
+// }
 
-impl<T, C, G> Recombiner<G, C> for T
-where
-	G: Genome,
-	T: Fn(&mut C, G, &G) -> G,
-{
-	fn crossover(&self, ctx: &mut C, par_a: G, par_b: &G) -> G {
-		(self)(ctx, par_a, par_b)
-	}
-}
+// impl<T, C, G> Recombiner<G, C> for T
+// where
+// 	G: Genome,
+// 	T: Fn(&mut C, G, &G) -> G,
+// {
+// 	fn crossover(&self, ctx: &mut C, par_a: G, par_b: &G) -> G {
+// 		(self)(ctx, par_a, par_b)
+// 	}
+// }
 
 impl<T, C, G> Predicate<G, C> for T
 where
