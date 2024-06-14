@@ -92,15 +92,15 @@ fn main() {
 				let fb = g.func().builder_mut();
 				// starting code for each genome
 				fb.func_body().i32_const(0);
-				g.mark_at(
-					0,
-					ctx.innov(
-						InnovNum(0),
-						ir::Instr::Const(ir::Const {
-							value: ir::Value::I32(0),
-						}),
-					),
-				);
+				// g.mark_at(
+				// 	0,
+				// 	ctx.innov(
+				// 		InnovNum(0),
+				// 		ir::Instr::Const(ir::Const {
+				// 			value: ir::Value::I32(0),
+				// 		}),
+				// 	),
+				// );
 				g
 			},
 		))

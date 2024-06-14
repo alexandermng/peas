@@ -47,15 +47,15 @@ impl Mutator<WasmGenome, Context> for NeutralAddOp {
 			"Adding Operation {op:?} at {loc} (within 0..{})",
 			indiv.func().size()
 		);
-		indiv.mark_at(
-			// wtf is this shit
-			loc,
-			ctx.innov(indiv.get_inno(loc), Instr::Const(Const { value: ident })),
-		);
-		indiv.mark_at(
-			loc + 1,
-			ctx.innov(indiv.get_inno(loc + 1), Instr::Binop(ir::Binop { op })),
-		);
+		// indiv.mark_at(
+		// 	// wtf is this shit
+		// 	loc,
+		// 	ctx.innov(indiv.get_inno(loc), Instr::Const(Const { value: ident })),
+		// );
+		// indiv.mark_at(
+		// 	loc + 1,
+		// 	ctx.innov(indiv.get_inno(loc + 1), Instr::Binop(ir::Binop { op })),
+		// );
 		indiv
 			.func()
 			.builder_mut()
@@ -99,7 +99,7 @@ impl Mutator<WasmGenome, Context> for SwapRoot {
 			indiv.func().block(entry)[loc].0,
 			instr
 		);
-		indiv.mark_at(loc, ctx.innov(indiv.get_inno(loc), instr.clone()));
+		// indiv.mark_at(loc, ctx.innov(indiv.get_inno(loc), instr.clone()));
 		indiv.func().block_mut(entry)[loc].0 = instr;
 		indiv
 	}
