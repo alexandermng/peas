@@ -1,1 +1,5 @@
+# Build artefacts
 /target
+
+# Trial Logs
+trial_*/
