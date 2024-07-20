@@ -1,6 +1,10 @@
 //! Genetic Algorithm Types
 
-use std::collections::HashSet;
+use std::{
+	cell::{Cell, RefCell},
+	collections::HashSet,
+	marker::PhantomData,
+};
 
 use rand::Rng;
 
@@ -90,39 +94,85 @@ pub trait Peeker<G: Genome, C> {
 	fn peek(&mut self, ctx: &mut C, pop: &[G]);
 }
 
+/// Mutator meant to be called only once (noop after). Used for gene initialization.
+pub struct OnceMutator<G, C, T = Box<dyn FnMut(&mut C, G) -> G>>
+where
+	G: Genome,
+	T: FnMut(&mut C, G) -> G,
+{
+	inner: RefCell<T>,
+	_phan: PhantomData<fn(&mut C, G) -> G>,
+}
+
+impl<T, G, C> OnceMutator<G, C, T>
+where
+	G: Genome,
+	T: FnMut(&mut C, G) -> G,
+{
+	pub fn new(mutator: T) -> Self {
+		Self {
+			inner: RefCell::new(mutator),
+			_phan: PhantomData,
+		}
+	}
+}
+
+impl<T, G, C> Mutator<G, C> for OnceMutator<G, C, T>
+where
+	G: Genome,
+	T: FnMut(&mut C, G) -> G,
+{
+	/// Runs closure on first mutation, and is a no-op on subsequent calls.
+	fn mutate(&self, ctx: &mut C, indiv: G) -> G {
+		let mut f = self.inner.borrow_mut();
+		(f)(ctx, indiv)
+	}
+}
+
+impl<T, G, C> From<T> for OnceMutator<G, C>
+where
+	G: Genome,
+	T: FnMut(&mut C, G) -> G + 'static,
+{
+	fn from(value: T) -> Self {
+		let value: Box<dyn FnMut(&mut C, G) -> G> = Box::new(value);
+		OnceMutator::new(value)
+	}
+}
+
 /***** Blanket Impls *****/
 
 /* bleh, no specialization... */
 
-impl<T, C, G> Selector<G, C> for T
-where
-	G: Genome,
-	T: Fn(&mut C, Vec<G>) -> Vec<G>,
-{
-	fn select(&self, ctx: &mut C, pop: Vec<G>) -> Vec<G> {
-		(self)(ctx, pop)
-	}
-}
+// impl<T, C, G> Selector<G, C> for T
+// where
+// 	G: Genome,
+// 	T: Fn(&mut C, Vec<G>) -> Vec<G>,
+// {
+// 	fn select(&self, ctx: &mut C, pop: Vec<G>) -> Vec<G> {
+// 		(self)(ctx, pop)
+// 	}
+// }
 
-impl<T, C, G> Mutator<G, C> for T
-where
-	G: Genome,
-	T: Fn(&mut C, G) -> G,
-{
-	fn mutate(&self, ctx: &mut C, indiv: G) -> G {
-		(self)(ctx, indiv)
-	}
-}
+// impl<T, C, G> Mutator<G, C> for T
+// where
+// 	G: Genome,
+// 	T: Fn(&mut C, G) -> G,
+// {
+// 	fn mutate(&self, ctx: &mut C, indiv: G) -> G {
+// 		(self)(ctx, indiv)
+// 	}
+// }
 
-impl<T, C, G> Recombiner<G, C> for T
-where
-	G: Genome,
-	T: Fn(&mut C, G, &G) -> G,
-{
-	fn crossover(&self, ctx: &mut C, par_a: G, par_b: &G) -> G {
-		(self)(ctx, par_a, par_b)
-	}
-}
+// impl<T, C, G> Recombiner<G, C> for T
+// where
+// 	G: Genome,
+// 	T: Fn(&mut C, G, &G) -> G,
+// {
+// 	fn crossover(&self, ctx: &mut C, par_a: G, par_b: &G) -> G {
+// 		(self)(ctx, par_a, par_b)
+// 	}
+// }
 
 impl<T, C, G> Predicate<G, C> for T
 where

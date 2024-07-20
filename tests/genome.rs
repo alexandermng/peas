@@ -25,8 +25,8 @@ fn empty_module() -> Result<()> {
 #[test]
 fn basic_module() -> Result<()> {
 	let mut g = WasmGenome::new(&[ValType::I32], &[ValType::I32]);
-	let arg = g.func().args[0];
-	g.func()
+	let arg = g.func_mut().args[0];
+	g.func_mut()
 		.builder_mut()
 		.func_body()
 		.local_get(arg)

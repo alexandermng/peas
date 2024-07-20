@@ -1,7 +1,7 @@
 //! WebAssembly Genome
 
 use std::{
-	cell::RefCell,
+	cell::{Ref, RefCell},
 	fmt::{Debug, Display},
 	ops::{Deref, DerefMut},
 };
@@ -78,7 +78,13 @@ impl WasmGenome {
 		})
 	}
 
-	pub fn func(&mut self) -> &mut walrus::LocalFunction {
+	pub(crate) fn func<'a>(&'a self) -> Ref<walrus::LocalFunction> {
+		Ref::map(self.module.borrow(), |m| {
+			m.funcs.get(self.func).kind.unwrap_local()
+		})
+	}
+
+	pub fn func_mut(&mut self) -> &mut walrus::LocalFunction {
 		self.module
 			.get_mut()
 			.funcs
