@@ -3,9 +3,9 @@
 //!
 
 use peas::{
-	genetic::{Mutator, Problem, Solution},
+	genetic::{Mutator, OnceMutator, Problem, Solution},
 	genome::InnovNum,
-	mutations::{NeutralAddOp, Rated, SequenceMutator, SwapRoot},
+	mutations::{NeutralAddOp, SequenceMutator, SwapRoot},
 	selection::TournamentSelection,
 	Context, WasmGABuilder, WasmGenome,
 };
@@ -14,7 +14,7 @@ use rand::{
 	thread_rng, Rng,
 };
 use rayon::prelude::*;
-use walrus::{ir, FunctionBuilder};
+use walrus::ir;
 
 struct Sum3 {
 	tests: Vec<((i32, i32, i32), i32)>, // input-output pairs
@@ -65,13 +65,28 @@ fn main() {
 	let seed: u64 = thread_rng().gen();
 	let muts: [&dyn Mutator<_, _>; 2] = [
 		// for use in sequence
-		// NeutralAddLocal::with_rate(0.01), // local variable
-		&Rated::new(NeutralAddOp, 0.3),
-		&Rated::new(SwapRoot, 0.1), // consts, locals, push onto stack
+		&NeutralAddOp::from_rate(0.7), // local variable
+		&SwapRoot::from_rate(0.2),     // consts, locals, push onto stack
 
-		                            // SwapOp::with_rate(0.02),
-		                            // AddTee::with_rate(0.02),
+		                               // NeutralAddLocal::with_rate(0.01),
+		                               // SwapOp::with_rate(0.02),
+		                               // AddTee::with_rate(0.02),
 	];
+	let init = |_ctx: &mut Context, mut g: WasmGenome| -> WasmGenome {
+		let fb = g.func_mut().builder_mut();
+		// starting code for each genome
+		fb.func_body().i32_const(0);
+		// g.mark_at(
+		// 	0,
+		// 	ctx.innov(
+		// 		InnovNum(0),
+		// 		ir::Instr::Const(ir::Const {
+		// 			value: ir::Value::I32(0),
+		// 		}),
+		// 	),
+		// );
+		g
+	};
 	let mut ga = WasmGABuilder::default()
 		.problem(prob)
 		.pop_size(100)
@@ -87,23 +102,7 @@ fn main() {
 		// .crossover()
 		.mutation_rate(1.0)
 		.mutation(SequenceMutator::from(&muts[..]))
-		.init_genome(Box::new(
-			|ctx: &mut Context, mut g: WasmGenome| -> WasmGenome {
-				let fb = g.func().builder_mut();
-				// starting code for each genome
-				fb.func_body().i32_const(0);
-				g.mark_at(
-					0,
-					ctx.innov(
-						InnovNum(0),
-						ir::Instr::Const(ir::Const {
-							value: ir::Value::I32(0),
-						}),
-					),
-				);
-				g
-			},
-		))
+		.init_genome(OnceMutator::from(init))
 		.seed(seed)
 		.build();
 	ga.run();

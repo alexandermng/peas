@@ -29,6 +29,9 @@ impl<M: WasmMutator> Mutator<WasmGenome, Context> for M {
 	fn mutate(&self, ctx: &mut Context, mut indiv: WasmGenome) -> WasmGenome {
 		let entry = indiv.func().entry_block();
 		let valids = self.find_valids(&indiv);
+		if valids.is_empty() {
+			return indiv;
+		}
 		let rate = self.rate(ctx, &indiv) / (valids.len() as f64); // rate per-valid-gene
 		let dist = Bernoulli::new(rate).unwrap();
 
@@ -42,18 +45,25 @@ impl<M: WasmMutator> Mutator<WasmGenome, Context> for M {
 	}
 }
 
-pub struct NeutralAddOp;
+pub struct NeutralAddOp {
+	rate: f64,
+}
+impl NeutralAddOp {
+	pub fn from_rate(rate: f64) -> Self {
+		Self { rate }
+	}
+}
 impl WasmMutator for NeutralAddOp {
 	fn find_valids(&self, indiv: &WasmGenome) -> Vec<usize> {
+		// Finds valid instructions
 		struct Cataloguer {
 			idx: usize,
 			cata: Vec<usize>,
 		};
 		impl<'instr> Visitor<'instr> for Cataloguer {
 			fn visit_instr(&mut self, instr: &'instr Instr, _: &'instr walrus::InstrLocId) {
-				if self.idx > 0 {
-					self.cata.push(self.idx);
-				}
+				// everything valid
+				self.cata.push(self.idx);
 				self.idx += 1;
 			}
 		}
@@ -63,27 +73,26 @@ impl WasmMutator for NeutralAddOp {
 		};
 		let entry = indiv.func().entry_block();
 		dfs_in_order(&mut vis, &indiv.func(), entry);
-		todo!()
+		log::debug!(
+			"NeutralAddOp found ({} valid / {} total) genes",
+			vis.cata.len(),
+			vis.idx
+		);
+		vis.cata
 	}
 
 	fn rate(&self, ctx: &mut Context, _: &WasmGenome) -> f64 {
-		todo!()
+		self.rate
 	}
 
 	fn mutate_gene(&self, ctx: &mut Context, indiv: &mut WasmGenome, loc: usize) {
-		// let unif = Uniform::new(1, indiv.func().size() as usize + 1);
-		// let loc = unif.sample(&mut ctx.rng); // chosen mutation location
-		// let func = indiv.func().block_mut(entry);
-		// func[0]
-		// TODO
-
-		static ALLOWED_OPS: [(BinaryOp, Value); 8] = [
+		static ALLOWED_OPS: [(BinaryOp, Value); 6] = [
 			// (Operation, Identity constant)
-			(BinaryOp::I32Add, Value::I32(0)),     // + 0
-			(BinaryOp::I32Sub, Value::I32(0)),     // - 0
-			(BinaryOp::I32Mul, Value::I32(1)),     // * 1
-			(BinaryOp::I32DivS, Value::I32(1)),    // ÷ 1
-			(BinaryOp::I32RemS, Value::I32(1)),    // % 1
+			(BinaryOp::I32Add, Value::I32(0)), // + 0
+			(BinaryOp::I32Sub, Value::I32(0)), // - 0
+			(BinaryOp::I32Mul, Value::I32(1)), // * 1
+			// (BinaryOp::I32DivS, Value::I32(1)),    // ÷ 1
+			// (BinaryOp::I32RemS, Value::I32(1)),    // % 1
 			(BinaryOp::I32And, Value::I32(-1i32)), // & 0xffffffff
 			(BinaryOp::I32Or, Value::I32(0)),      // | 0x00000000
 			(BinaryOp::I32Xor, Value::I32(0)),     // ^ 0x00000000
@@ -106,29 +115,58 @@ impl WasmMutator for NeutralAddOp {
 		// 	ctx.innov(indiv.get_inno(loc + 1), Instr::Binop(ir::Binop { op })),
 		// );
 		indiv
-			.func()
+			.func_mut()
 			.builder_mut()
 			.func_body()
-			.const_at(loc, ident)
-			.binop_at(loc + 1, op);
+			.const_at(loc + 1, ident)
+			.binop_at(loc + 2, op);
 	}
 }
 
-pub struct SwapRoot;
-impl Mutator<WasmGenome, Context> for SwapRoot {
-	fn mutate(&self, ctx: &mut Context, mut indiv: WasmGenome) -> WasmGenome {
+pub struct SwapRoot {
+	rate: f64,
+}
+impl SwapRoot {
+	pub fn from_rate(rate: f64) -> Self {
+		Self { rate }
+	}
+}
+impl WasmMutator for SwapRoot {
+	fn find_valids(&self, indiv: &WasmGenome) -> Vec<usize> {
+		// Finds valid instructions
+		struct Cataloguer {
+			idx: usize,
+			cata: Vec<usize>,
+		};
+		impl<'instr> Visitor<'instr> for Cataloguer {
+			fn visit_instr(&mut self, instr: &'instr Instr, _: &'instr walrus::InstrLocId) {
+				if instr.is_const() || instr.is_local_get() || instr.is_global_get() {
+					// consts or gets
+					self.cata.push(self.idx);
+				}
+				self.idx += 1;
+			}
+		}
+		let mut vis = Cataloguer {
+			idx: 0,
+			cata: vec![],
+		};
 		let entry = indiv.func().entry_block();
-		let potentials: Vec<_> = indiv
-			.func()
-			.block(entry)
-			.iter()
-			.enumerate()
-			.filter(|(_, (i, _))| i.is_const() || i.is_local_get())
-			.map(|(pos, (i, _))| (pos, i))
-			.collect();
-		let chosen = potentials.choose(&mut ctx.rng).unwrap();
-		let loc = chosen.0;
+		dfs_in_order(&mut vis, &indiv.func(), entry);
+		log::debug!(
+			"SwapRoot found ({} valid / {} total) genes",
+			vis.cata.len(),
+			vis.idx
+		);
+		vis.cata
+	}
 
+	fn rate(&self, ctx: &mut Context, _: &WasmGenome) -> f64 {
+		self.rate
+	}
+
+	fn mutate_gene(&self, ctx: &mut Context, indiv: &mut WasmGenome, loc: usize) {
+		let entry = indiv.func().entry_block();
 		let instr = match ctx.rng.gen_range(0f64..=1f64) {
 			0.0..=0.6 => {
 				let local = *indiv.func().args.choose(&mut ctx.rng).unwrap();
@@ -145,9 +183,8 @@ impl Mutator<WasmGenome, Context> for SwapRoot {
 			indiv.func().block(entry)[loc].0,
 			instr
 		);
-		// indiv.mark_at(loc, ctx.innov(indiv.get_inno(loc), instr.clone()));
-		indiv.func().block_mut(entry)[loc].0 = instr;
-		indiv
+
+		indiv.func_mut().block_mut(entry)[loc].0 = instr;
 	}
 }
 
@@ -220,3 +257,5 @@ impl<'a> From<&'a [&'a dyn Mutator<WasmGenome, Context>]> for SequenceMutator<'a
 // 		}
 // 	}
 // }
+
+// TODO dynamic rate

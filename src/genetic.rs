@@ -1,6 +1,10 @@
 //! Genetic Algorithm Types
 
-use std::{cell::Cell, collections::HashSet};
+use std::{
+	cell::{Cell, RefCell},
+	collections::HashSet,
+	marker::PhantomData,
+};
 
 use rand::Rng;
 
@@ -91,35 +95,47 @@ pub trait Peeker<G: Genome, C> {
 }
 
 /// Mutator meant to be called only once (noop after). Used for gene initialization.
-pub struct OnceMutator<T> {
-	inner: Cell<Option<T>>,
+pub struct OnceMutator<G, C, T = Box<dyn FnMut(&mut C, G) -> G>>
+where
+	G: Genome,
+	T: FnMut(&mut C, G) -> G,
+{
+	inner: RefCell<T>,
+	_phan: PhantomData<fn(&mut C, G) -> G>,
 }
 
-impl<T> OnceMutator<T> {
+impl<T, G, C> OnceMutator<G, C, T>
+where
+	G: Genome,
+	T: FnMut(&mut C, G) -> G,
+{
 	pub fn new(mutator: T) -> Self {
 		Self {
-			inner: Cell::new(Some(mutator)),
+			inner: RefCell::new(mutator),
+			_phan: PhantomData,
 		}
 	}
 }
 
-impl<T, C, G> Mutator<G, C> for OnceMutator<T>
+impl<T, G, C> Mutator<G, C> for OnceMutator<G, C, T>
 where
 	G: Genome,
-	T: FnOnce(&mut C, G) -> G,
+	T: FnMut(&mut C, G) -> G,
 {
 	/// Runs closure on first mutation, and is a no-op on subsequent calls.
 	fn mutate(&self, ctx: &mut C, indiv: G) -> G {
-		if let Some(func) = self.inner.take() {
-			func(ctx, indiv)
-		} else {
-			indiv
-		}
+		let mut f = self.inner.borrow_mut();
+		(f)(ctx, indiv)
 	}
 }
 
-impl<T> From<T> for OnceMutator<T> {
+impl<T, G, C> From<T> for OnceMutator<G, C>
+where
+	G: Genome,
+	T: FnMut(&mut C, G) -> G + 'static,
+{
 	fn from(value: T) -> Self {
+		let value: Box<dyn FnMut(&mut C, G) -> G> = Box::new(value);
 		OnceMutator::new(value)
 	}
 }

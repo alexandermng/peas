@@ -16,7 +16,7 @@ use std::{
 };
 
 use eyre::{eyre, DefaultHandler, OptionExt, Result};
-use genetic::Predicate;
+use genetic::{OnceMutator, Predicate};
 use genome::InnovNum;
 use rand::{
 	seq::{IteratorRandom, SliceRandom},
@@ -186,7 +186,7 @@ where
 	// crossover: C
 	mutation_rate: f64,
 	mutation: M,
-	init_genome: Box<dyn Mutator<WasmGenome, Context>>,
+	init_genome: OnceMutator<WasmGenome, Context>,
 	stop_cond: Box<dyn Predicate<WasmGenome, Context>>,
 	num_generations: usize, // maximum generations to go
 	seed: u64,
@@ -401,7 +401,7 @@ where
 	// crossover: Option<C>
 	mutation_rate: Option<f64>,
 	mutation: Option<M>,
-	starter: Option<Box<dyn Mutator<WasmGenome, Context>>>,
+	starter: Option<OnceMutator<WasmGenome, Context>>,
 	stop_cond: Option<Box<dyn Predicate<WasmGenome, Context>>>,
 	generations: Option<usize>,
 	seed: Option<u64>,
@@ -485,7 +485,7 @@ where
 		self
 	}
 
-	pub fn init_genome(mut self, init: Box<dyn Mutator<WasmGenome, Context>>) -> Self {
+	pub fn init_genome(mut self, init: OnceMutator<WasmGenome, Context>) -> Self {
 		self.starter = Some(init);
 		self
 	}
