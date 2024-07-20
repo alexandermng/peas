@@ -29,17 +29,12 @@ impl<M: WasmMutator> Mutator<WasmGenome, Context> for M {
 	fn mutate(&self, ctx: &mut Context, mut indiv: WasmGenome) -> WasmGenome {
 		let entry = indiv.func().entry_block();
 		let valids = self.find_valids(&indiv);
-		if valids.is_empty() {
+		let rate = self.rate(ctx, &indiv);
+		if valids.is_empty() || !ctx.rng.gen_bool(rate) {
 			return indiv;
 		}
-		let rate = self.rate(ctx, &indiv) / (valids.len() as f64); // rate per-valid-gene
-		let dist = Bernoulli::new(rate).unwrap();
-
-		for loc in valids {
-			if dist.sample(&mut ctx.rng) {
-				self.mutate_gene(ctx, &mut indiv, loc);
-			}
-		}
+		let chosen = *valids.choose(&mut ctx.rng).unwrap();
+		self.mutate_gene(ctx, &mut indiv, chosen);
 
 		indiv
 	}

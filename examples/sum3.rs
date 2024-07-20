@@ -65,8 +65,8 @@ fn main() {
 	let seed: u64 = thread_rng().gen();
 	let muts: [&dyn Mutator<_, _>; 2] = [
 		// for use in sequence
-		&NeutralAddOp::from_rate(0.7), // local variable
-		&SwapRoot::from_rate(0.2),     // consts, locals, push onto stack
+		&NeutralAddOp::from_rate(0.2), // local variable
+		&SwapRoot::from_rate(0.4),     // consts, locals, push onto stack
 
 		                               // NeutralAddLocal::with_rate(0.01),
 		                               // SwapOp::with_rate(0.02),
