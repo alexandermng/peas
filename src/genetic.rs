@@ -44,7 +44,7 @@ pub trait Genome {
 	fn fitness(&self) -> f64;
 }
 
-/// Represents a task or problem to be solved by a WebAssembly module. Should contain
+/// Represents a task or problem to be solved by a genetic algorithm's individual/agent. Should contain
 /// problem parameters and necessary training data for evaluation.
 pub trait Problem {
 	type In; // type of inputs/arguments to the Agent (e.g. (i32, i32) )

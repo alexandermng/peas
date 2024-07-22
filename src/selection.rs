@@ -9,7 +9,7 @@ use rand::{
 
 use crate::{
 	genetic::{Genome, Selector},
-	Context,
+	wasm::Context,
 };
 
 /// Tournament Selection

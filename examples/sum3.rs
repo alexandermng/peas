@@ -4,17 +4,15 @@
 
 use peas::{
 	genetic::{Mutator, OnceMutator, Problem, Solution},
-	genome::InnovNum,
-	mutations::{NeutralAddOp, SequenceMutator, SwapRoot},
 	selection::TournamentSelection,
-	Context, WasmGABuilder, WasmGenome,
+	wasm::mutations::{NeutralAddOp, SequenceMutator, SwapRoot},
+	wasm::{Context, WasmGenAlgBuilder, WasmGenome},
 };
 use rand::{
 	distributions::{Distribution, Uniform},
 	thread_rng, Rng,
 };
-use rayon::prelude::*;
-use walrus::ir;
+// use rayon::prelude::*;
 
 struct Sum3 {
 	tests: Vec<((i32, i32, i32), i32)>, // input-output pairs
@@ -66,7 +64,7 @@ fn main() {
 	let muts: [&dyn Mutator<_, _>; 2] = [
 		// for use in sequence
 		&NeutralAddOp::from_rate(0.2), // local variable
-		&SwapRoot::from_rate(0.4),     // consts, locals, push onto stack
+		&SwapRoot::from_rate(0.3),     // consts, locals, push onto stack
 
 		                               // NeutralAddLocal::with_rate(0.01),
 		                               // SwapOp::with_rate(0.02),
@@ -87,10 +85,10 @@ fn main() {
 		// );
 		g
 	};
-	let mut ga = WasmGABuilder::default()
+	let mut ga = WasmGenAlgBuilder::default()
 		.problem(prob)
 		.pop_size(100)
-		.generations(20)
+		.generations(30)
 		.stop_condition(Box::new(|ctx: &mut Context, _: &[WasmGenome]| -> bool {
 			ctx.max_fitness >= 1.0
 		}))

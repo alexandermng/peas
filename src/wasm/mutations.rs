@@ -11,7 +11,8 @@ use walrus::{
 	FunctionBuilder,
 };
 
-use crate::{genetic::Mutator, Context, WasmGenome};
+use crate::genetic::Mutator;
+use crate::wasm::{Context, WasmGenome};
 
 /// Mutation by individual genes
 pub trait WasmMutator {
