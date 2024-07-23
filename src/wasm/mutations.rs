@@ -6,10 +6,6 @@ use rand::{
 	seq::SliceRandom,
 	Rng,
 };
-use walrus::{
-	ir::{self, dfs_in_order, BinaryOp, Const, Instr, LocalGet, Value, Visitor},
-	FunctionBuilder,
-};
 
 use crate::genetic::Mutator;
 use crate::wasm::{Context, WasmGenome};
@@ -28,16 +24,17 @@ pub trait WasmMutator {
 
 impl<M: WasmMutator> Mutator<WasmGenome, Context> for M {
 	fn mutate(&self, ctx: &mut Context, mut indiv: WasmGenome) -> WasmGenome {
-		let entry = indiv.func().entry_block();
-		let valids = self.find_valids(&indiv);
-		let rate = self.rate(ctx, &indiv);
-		if valids.is_empty() || !ctx.rng.gen_bool(rate) {
-			return indiv;
-		}
-		let chosen = *valids.choose(&mut ctx.rng).unwrap();
-		self.mutate_gene(ctx, &mut indiv, chosen);
+		// let entry = indiv.func().entry_block();
+		// let valids = self.find_valids(&indiv);
+		// let rate = self.rate(ctx, &indiv);
+		// if valids.is_empty() || !ctx.rng.gen_bool(rate) {
+		// 	return indiv;
+		// }
+		// let chosen = *valids.choose(&mut ctx.rng).unwrap();
+		// self.mutate_gene(ctx, &mut indiv, chosen);
 
-		indiv
+		// indiv
+		todo!()
 	}
 }
 
@@ -51,30 +48,8 @@ impl NeutralAddOp {
 }
 impl WasmMutator for NeutralAddOp {
 	fn find_valids(&self, indiv: &WasmGenome) -> Vec<usize> {
-		// Finds valid instructions
-		struct Cataloguer {
-			idx: usize,
-			cata: Vec<usize>,
-		};
-		impl<'instr> Visitor<'instr> for Cataloguer {
-			fn visit_instr(&mut self, instr: &'instr Instr, _: &'instr walrus::InstrLocId) {
-				// everything valid
-				self.cata.push(self.idx);
-				self.idx += 1;
-			}
-		}
-		let mut vis = Cataloguer {
-			idx: 0,
-			cata: vec![],
-		};
-		let entry = indiv.func().entry_block();
-		dfs_in_order(&mut vis, &indiv.func(), entry);
-		log::debug!(
-			"NeutralAddOp found ({} valid / {} total) genes",
-			vis.cata.len(),
-			vis.idx
-		);
-		vis.cata
+		log::debug!("NeutralAddOp found ({} valid / {} total) genes", -1, -1);
+		todo!()
 	}
 
 	fn rate(&self, ctx: &mut Context, _: &WasmGenome) -> f64 {
@@ -82,40 +57,41 @@ impl WasmMutator for NeutralAddOp {
 	}
 
 	fn mutate_gene(&self, ctx: &mut Context, indiv: &mut WasmGenome, loc: usize) {
-		static ALLOWED_OPS: [(BinaryOp, Value); 6] = [
-			// (Operation, Identity constant)
-			(BinaryOp::I32Add, Value::I32(0)), // + 0
-			(BinaryOp::I32Sub, Value::I32(0)), // - 0
-			(BinaryOp::I32Mul, Value::I32(1)), // * 1
-			// (BinaryOp::I32DivS, Value::I32(1)),    // ÷ 1
-			// (BinaryOp::I32RemS, Value::I32(1)),    // % 1
-			(BinaryOp::I32And, Value::I32(-1i32)), // & 0xffffffff
-			(BinaryOp::I32Or, Value::I32(0)),      // | 0x00000000
-			(BinaryOp::I32Xor, Value::I32(0)),     // ^ 0x00000000
+		// static ALLOWED_OPS: [(BinaryOp, Value); 6] = [
+		// 	// (Operation, Identity constant)
+		// 	(BinaryOp::I32Add, Value::I32(0)), // + 0
+		// 	(BinaryOp::I32Sub, Value::I32(0)), // - 0
+		// 	(BinaryOp::I32Mul, Value::I32(1)), // * 1
+		// 	// (BinaryOp::I32DivS, Value::I32(1)),    // ÷ 1
+		// 	// (BinaryOp::I32RemS, Value::I32(1)),    // % 1
+		// 	(BinaryOp::I32And, Value::I32(-1i32)), // & 0xffffffff
+		// 	(BinaryOp::I32Or, Value::I32(0)),      // | 0x00000000
+		// 	(BinaryOp::I32Xor, Value::I32(0)),     // ^ 0x00000000
 
-			                                       // ...etc
-		];
-		let (op, ident) = *ALLOWED_OPS.choose(&mut ctx.rng).unwrap();
+		// 	                                       // ...etc
+		// ];
+		// let (op, ident) = *ALLOWED_OPS.choose(&mut ctx.rng).unwrap();
 
-		log::debug!(
-			"Adding Operation {op:?} at {loc} (within 0..{})",
-			indiv.func().size()
-		);
-		// indiv.mark_at(
-		// 	// wtf is this shit
-		// 	loc,
-		// 	ctx.innov(indiv.get_inno(loc), Instr::Const(Const { value: ident })),
+		// log::debug!(
+		// 	"Adding Operation {op:?} at {loc} (within 0..{})",
+		// 	indiv.func().size()
 		// );
-		// indiv.mark_at(
-		// 	loc + 1,
-		// 	ctx.innov(indiv.get_inno(loc + 1), Instr::Binop(ir::Binop { op })),
-		// );
-		indiv
-			.func_mut()
-			.builder_mut()
-			.func_body()
-			.const_at(loc + 1, ident)
-			.binop_at(loc + 2, op);
+		// // indiv.mark_at(
+		// // 	// wtf is this shit
+		// // 	loc,
+		// // 	ctx.innov(indiv.get_inno(loc), Instr::Const(Const { value: ident })),
+		// // );
+		// // indiv.mark_at(
+		// // 	loc + 1,
+		// // 	ctx.innov(indiv.get_inno(loc + 1), Instr::Binop(ir::Binop { op })),
+		// // );
+		// indiv
+		// 	.func_mut()
+		// 	.builder_mut()
+		// 	.func_body()
+		// 	.const_at(loc + 1, ident)
+		// 	.binop_at(loc + 2, op);
+		todo!()
 	}
 }
 
@@ -129,32 +105,8 @@ impl SwapRoot {
 }
 impl WasmMutator for SwapRoot {
 	fn find_valids(&self, indiv: &WasmGenome) -> Vec<usize> {
-		// Finds valid instructions
-		struct Cataloguer {
-			idx: usize,
-			cata: Vec<usize>,
-		};
-		impl<'instr> Visitor<'instr> for Cataloguer {
-			fn visit_instr(&mut self, instr: &'instr Instr, _: &'instr walrus::InstrLocId) {
-				if instr.is_const() || instr.is_local_get() || instr.is_global_get() {
-					// consts or gets
-					self.cata.push(self.idx);
-				}
-				self.idx += 1;
-			}
-		}
-		let mut vis = Cataloguer {
-			idx: 0,
-			cata: vec![],
-		};
-		let entry = indiv.func().entry_block();
-		dfs_in_order(&mut vis, &indiv.func(), entry);
-		log::debug!(
-			"SwapRoot found ({} valid / {} total) genes",
-			vis.cata.len(),
-			vis.idx
-		);
-		vis.cata
+		log::debug!("SwapRoot found ({} valid / {} total) genes", -1, -1);
+		todo!()
 	}
 
 	fn rate(&self, ctx: &mut Context, _: &WasmGenome) -> f64 {
@@ -162,25 +114,26 @@ impl WasmMutator for SwapRoot {
 	}
 
 	fn mutate_gene(&self, ctx: &mut Context, indiv: &mut WasmGenome, loc: usize) {
-		let entry = indiv.func().entry_block();
-		let instr = match ctx.rng.gen_range(0f64..=1f64) {
-			0.0..=0.6 => {
-				let local = *indiv.func().args.choose(&mut ctx.rng).unwrap();
-				Instr::LocalGet(LocalGet { local })
-			}
-			0.6..=1.0 => {
-				let value = Value::I32(ctx.rng.gen());
-				Instr::Const(Const { value })
-			}
-			_ => unreachable!("we don't generate outside handled range"),
-		};
-		log::debug!(
-			"Swapping {:?} into {:?}",
-			indiv.func().block(entry)[loc].0,
-			instr
-		);
+		// let entry = indiv.func().entry_block();
+		// let instr = match ctx.rng.gen_range(0f64..=1f64) {
+		// 	0.0..=0.6 => {
+		// 		let local = *indiv.func().args.choose(&mut ctx.rng).unwrap();
+		// 		Instr::LocalGet(LocalGet { local })
+		// 	}
+		// 	0.6..=1.0 => {
+		// 		let value = Value::I32(ctx.rng.gen());
+		// 		Instr::Const(Const { value })
+		// 	}
+		// 	_ => unreachable!("we don't generate outside handled range"),
+		// };
+		// log::debug!(
+		// 	"Swapping {:?} into {:?}",
+		// 	indiv.func().block(entry)[loc].0,
+		// 	instr
+		// );
 
-		indiv.func_mut().block_mut(entry)[loc].0 = instr;
+		// indiv.func_mut().block_mut(entry)[loc].0 = instr;
+		todo!()
 	}
 }
 

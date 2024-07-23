@@ -15,7 +15,7 @@ use rand::{
 };
 use rand_pcg::Pcg64Mcg;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use walrus::{CustomSection, FunctionBuilder, LocalFunction, ValType};
+use wasm_encoder::ValType;
 use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
 // use wasm_encoder::{
 // 	CodeSection, Function, FunctionSection, Instruction, Module, TypeSection, ValType,
@@ -201,11 +201,11 @@ where
 				log::info!("\t{} <-- {}", p.fitness, p);
 			}
 			let filename = format!("trial_{}.log/gen_{}.wasm", self.seed, ctx.generation);
-			pop[0] // best
-				.module
-				.borrow_mut()
-				.emit_wasm_file(filename) // still dont know why this is mut tbh
-				.unwrap();
+			// pop[0] // best
+			// 	.module
+			// 	.borrow_mut()
+			// 	.emit_wasm_file(filename) // still dont know why this is mut tbh
+			// 	.unwrap();
 			// TODO logging hook
 
 			// Test stop condition
