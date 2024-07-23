@@ -1,7 +1,7 @@
 use eyre::Result;
 use wasm_encoder::{
 	CodeSection, ExportKind, ExportSection, FunctionSection, Instruction, PrimitiveValType,
-	TypeSection,
+	TypeSection, ValType,
 };
 use wasm_encoder::{ComponentBuilder, Function, Module};
 use wasmtime::component::{Component, Linker};
@@ -12,7 +12,8 @@ fn generate() -> Vec<u8> {
 	let mut modu = Module::new();
 	let types = {
 		let mut ts = TypeSection::new();
-		ts.function(&[PrimitiveValType::I32], &[PrimitiveValType::Bool]);
+		// ts.function(&[PrimitiveValType::S32], &[PrimitiveValType::Bool]);
+		ts.function([ValType::I32], [ValType::I32]);
 		ts
 	};
 	let funcs = {
@@ -50,10 +51,10 @@ fn main() -> Result<(), wasmtime::Error> {
 	let linker = Linker::new(&engine);
 	let mut store = Store::new(&engine, ());
 	let instance = linker.instantiate(&mut store, &comp)?;
-	let main = instance.get_typed_func::<i32, bool>(&mut store, "main")?;
+	let main = instance.get_typed_func::<(i32,), (i32,)>(&mut store, "main")?;
 
-	let args = (10, 20, 30);
-	let res = main.call(&mut store, args)?;
+	let args = (2,);
+	let (res,) = main.call(&mut store, args)?;
 	println!("{args:?} -> {res}");
 
 	Ok(())

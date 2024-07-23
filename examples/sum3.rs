@@ -70,21 +70,7 @@ fn main() {
 		                               // SwapOp::with_rate(0.02),
 		                               // AddTee::with_rate(0.02),
 	];
-	let init = |_ctx: &mut Context, mut g: WasmGenome| -> WasmGenome {
-		let fb = g.func_mut().builder_mut();
-		// starting code for each genome
-		fb.func_body().i32_const(0);
-		// g.mark_at(
-		// 	0,
-		// 	ctx.innov(
-		// 		InnovNum(0),
-		// 		ir::Instr::Const(ir::Const {
-		// 			value: ir::Value::I32(0),
-		// 		}),
-		// 	),
-		// );
-		g
-	};
+	let init = |_ctx: &mut Context, mut g: WasmGenome| -> WasmGenome { todo!() };
 	let mut ga = WasmGenAlgBuilder::default()
 		.problem(prob)
 		.pop_size(100)
