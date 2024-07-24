@@ -76,6 +76,14 @@ impl From<ValType> for StackValType {
 	}
 }
 
+fn vtl_to_svtv(valtypeliteral: &[ValType]) -> Vec<StackValType> {
+	valtypeliteral.iter().map(|v| StackValType::from(v.clone())).collect()
+}
+
+fn svtv_to_vtv(stackvaltypevec: Vec<StackValType>) -> Vec<ValType> {
+	stackvaltypevec.iter().map(|v| ValType::from(v.clone())).collect()
+}
+
 /// A gene of the Wasm Genome, holding its type and historical marker.
 #[derive(Clone, Debug)]
 pub struct WasmGene<'a> {
@@ -163,8 +171,8 @@ impl WasmGenome {
 		WasmGenome {
 			genes: Vec::new(),
 			fitness: 0.0,
-			params: if params.len() == 0 {Vec::new()} else {params.iter().map(|v| StackValType::from(v.clone())).collect()},
-			result: if result.len() == 0 {Vec::new()} else {result.iter().map(|v| StackValType::from(v.clone())).collect()},
+			params: if params.len() == 0 {Vec::new()} else {vtl_to_svtv(params)},
+			result: if result.len() == 0 {Vec::new()} else {vtl_to_svtv(result)},
 
 			locals: Vec::new(), // TODO clone params
 		}
@@ -225,7 +233,7 @@ impl WasmGenome {
 		let mut modu = Module::new();
 		let types = {
 			let mut ts = TypeSection::new();
-			ts.function(self.params.clone(), self.result.clone());
+			ts.function(svtv_to_vtv(self.params.clone()), svtv_to_vtv(self.result.clone()));
 			ts
 		};
 		let funcidx = 0;
