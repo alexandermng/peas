@@ -117,6 +117,8 @@ impl<'a> Eq for WasmGene<'a> {}
 pub struct WasmGenome {
 	pub genes: Vec<WasmGene<'static>>,
 	pub fitness: f64,
+	pub params: Vec<ValType>,
+	pub result: Vec<ValType>
 }
 
 impl WasmGenome {
@@ -139,7 +141,17 @@ impl WasmGenome {
 		// 	markers: vec![],
 		// 	fitness: 0.0,
 		// }
-		todo!()
+
+
+		//Not sure what default values to put here; should be a blank initialization i think
+		WasmGenome {
+			genes: Vec::new(),
+			fitness: 0.0,
+			params: Vec::new(),
+			result: Vec::new()
+		}
+
+
 	}
 
 	pub fn from_binary(binary: &[u8]) -> Result<Self> {
@@ -197,7 +209,7 @@ impl WasmGenome {
 		let mut modu = Module::new();
 		let types = {
 			let mut ts = TypeSection::new();
-			ts.function([ValType::I32, ValType::I32, ValType::I32], [ValType::I32]); // TODO fix hardcode
+			ts.function(self.params.clone(), self.result.clone()); // TODO fix hardcode //DONE
 			ts
 		};
 		let funcidx = 0;
