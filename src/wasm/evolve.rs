@@ -24,7 +24,10 @@ use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults,
 use crate::genetic::{
 	self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Problem, Selector, Solution,
 };
-use crate::wasm::{genome::WasmGenome, mutations::NeutralAddOp};
+use crate::wasm::{
+	genome::{StackValType, WasmGenome},
+	mutations::NeutralAddOp,
+};
 
 /// Assembled phenotype of an individual in a genetic algorithm. Used as a solution to a problem.
 #[derive(Clone)]
@@ -159,8 +162,8 @@ where
 	}
 
 	fn init(&mut self) {
-		let params = &[ValType::I32, ValType::I32, ValType::I32]; // hardcoded for now, TODO fix
-		let result = &[ValType::I32];
+		let params = &[StackValType::I32, StackValType::I32, StackValType::I32]; // TODO: fix hardcode
+		let result = &[StackValType::I32];
 		for i in 0..self.pop_size {
 			let mut wg = WasmGenome::new(params, result);
 			wg = self.init_genome.mutate(self.ctx.get_mut(), wg);

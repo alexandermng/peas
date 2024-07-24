@@ -62,26 +62,17 @@ impl From<StackValType> for ValType {
 	}
 }
 
-
 //mapping isn't one-to-one so idk if this is fine
 impl From<ValType> for StackValType {
 	fn from(value: ValType) -> Self {
 		match value {
-		ValType::I32 => StackValType::I32,
-		ValType::I64 => StackValType::I64,
-		ValType::F32 => StackValType::I32,
-		ValType::F64 => StackValType::I64,
-		_ => todo!()
+			ValType::I32 => StackValType::I32,
+			ValType::I64 => StackValType::I64,
+			ValType::F32 => StackValType::I32,
+			ValType::F64 => StackValType::I64,
+			_ => todo!(),
 		}
 	}
-}
-
-fn vtl_to_svtv(valtypeliteral: &[ValType]) -> Vec<StackValType> {
-	valtypeliteral.iter().map(|v| StackValType::from(v.clone())).collect()
-}
-
-fn svtv_to_vtv(stackvaltypevec: Vec<StackValType>) -> Vec<ValType> {
-	stackvaltypevec.iter().map(|v| ValType::from(v.clone())).collect()
 }
 
 /// A gene of the Wasm Genome, holding its type and historical marker.
@@ -148,33 +139,17 @@ pub struct WasmGenome {
 
 impl WasmGenome {
 	/// Create a new WasmGenome with the given signature for the main function.
-	pub fn new(params: &[ValType], result: &[ValType]) -> Self {
-		// let mut config = walrus::ModuleConfig::default();
-		// config
-		// 	.generate_name_section(false)
-		// 	.generate_producers_section(false)
-		// 	// .preserve_code_transform(true) // huh?
-		// 	;
-		// let mut module = walrus::Module::with_config(config);
-		// let mut func = FunctionBuilder::new(&mut module.types, params, result); // empty body
-		// let args: Vec<_> = params.iter().map(|&p| module.locals.add(p)).collect();
-		// let func = func.finish(args, &mut module.funcs);
-		// module.exports.add("main", func);
-		// WasmGenome {
-		// 	module: RefCell::new(module),
-		// 	func,
-		// 	markers: vec![],
-		// 	fitness: 0.0,
-		// }
-
-		//Not sure what default values to put here; should be a blank initialization i think
+	pub fn new(params: &[StackValType], result: &[StackValType]) -> Self {
+		let params = params.to_vec();
+		let result = result.to_vec();
+		let locals = params.clone();
 		WasmGenome {
 			genes: Vec::new(),
 			fitness: 0.0,
-			params: if params.len() == 0 {Vec::new()} else {vtl_to_svtv(params)},
-			result: if result.len() == 0 {Vec::new()} else {vtl_to_svtv(result)},
+			params,
+			result,
 
-			locals: Vec::new(), // TODO clone params
+			locals,
 		}
 	}
 
@@ -209,6 +184,8 @@ impl WasmGenome {
 	// 		.unwrap_local_mut()
 	// }
 
+	// TODO(AN): .replace(0, ...)
+
 	// /// Retrieve the local position by global innovation number.
 	// pub fn get_instr(&self, inno: InnovNum) -> usize {
 	// 	self.markers
@@ -233,7 +210,10 @@ impl WasmGenome {
 		let mut modu = Module::new();
 		let types = {
 			let mut ts = TypeSection::new();
-			ts.function(svtv_to_vtv(self.params.clone()), svtv_to_vtv(self.result.clone()));
+			ts.function(
+				self.params.iter().map(|&v| v.into()),
+				self.result.iter().map(|&v| v.into()),
+			);
 			ts
 		};
 		let funcidx = 0;
@@ -280,7 +260,7 @@ impl Display for WasmGenome {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.write_str("Genome[")?;
 		for b in self.emit() {
-			// TODO OPT: shed chaff, just core main code
+			// OPT: shed chaff, just core main code
 			write!(f, "{:X}", b)?;
 		}
 		f.write_str("]")

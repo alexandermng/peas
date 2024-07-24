@@ -8,7 +8,7 @@ use wasmtime::{Engine, Module};
 
 #[test]
 fn empty_module() -> Result<()> {
-	let g = WasmGenome::new(&[ValType::I32], &[]);
+	let g = WasmGenome::new(&[StackValType::I32], &[]);
 	let bytes = g.emit();
 	let mut file = File::create("test_empty.wasm")?;
 	file.write_all(&bytes)?;
@@ -25,7 +25,7 @@ fn empty_module() -> Result<()> {
 
 #[test]
 fn basic_module() -> Result<()> {
-	let mut g = WasmGenome::new(&[ValType::I32], &[ValType::I32]);
+	let mut g = WasmGenome::new(&[StackValType::I32], &[StackValType::I32]);
 	// let arg = g.func_mut().args[0];
 	// g.func_mut()
 	// 	.builder_mut()
