@@ -68,8 +68,9 @@ pub struct WasmGene<'a> {
 	pub instr: Instruction<'a>,
 	pub marker: InnovNum,
 
-	popty: Cow<'a, [StackValType]>, // OPT: global append-only cache
-	pushty: Cow<'a, [StackValType]>,
+	// pub(crate) for now until new() stable
+	pub(crate) popty: Cow<'a, [StackValType]>, // OPT: global append-only cache
+	pub(crate) pushty: Cow<'a, [StackValType]>,
 }
 
 impl<'a> WasmGene<'a> {
@@ -118,7 +119,7 @@ pub struct WasmGenome {
 	pub genes: Vec<WasmGene<'static>>,
 	pub fitness: f64,
 	pub params: Vec<ValType>,
-	pub result: Vec<ValType>
+	pub result: Vec<ValType>,
 }
 
 impl WasmGenome {
@@ -142,16 +143,13 @@ impl WasmGenome {
 		// 	fitness: 0.0,
 		// }
 
-
 		//Not sure what default values to put here; should be a blank initialization i think
 		WasmGenome {
 			genes: Vec::new(),
 			fitness: 0.0,
 			params: Vec::new(),
-			result: Vec::new()
+			result: Vec::new(),
 		}
-
-
 	}
 
 	pub fn from_binary(binary: &[u8]) -> Result<Self> {

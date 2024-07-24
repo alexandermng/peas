@@ -8,7 +8,7 @@ use rand::{
 };
 use wasm_encoder::Instruction;
 
-use crate::wasm::{Context, WasmGenome};
+use crate::wasm::{Context, InnovNum, WasmGene, WasmGenome};
 use crate::{genetic::Mutator, wasm::StackValType};
 
 /// Mutation by individual genes
@@ -68,10 +68,14 @@ impl WasmMutator for NeutralAddOp {
 			(Instruction::I32Or, 0),
 			(Instruction::I32Xor, 0),
 		];
-		let (op, ident) = match indiv.genes[loc].ty() {
-			(_, &[StackValType::I32]) => {
+		let (ty, op, ident) = match indiv.genes[loc].ty() {
+			(
+				_,
+				ty @ &[StackValType::U8 | StackValType::I8 | StackValType::U32 | StackValType::I32],
+			) => {
+				assert!(ty.len() == 1); // TODO ^ make match on 1 exact
 				let (op, i) = I32_OPS.choose(&mut ctx.rng).unwrap();
-				(op.clone(), Instruction::I32Const(*i))
+				(ty[0], op.clone(), Instruction::I32Const(*i))
 			} // anything that pushes an I32
 			_ => unimplemented!("unrecognized gene type"),
 		};
@@ -79,8 +83,20 @@ impl WasmMutator for NeutralAddOp {
 			"Adding Operation {op:?} at {loc} (within 0..{})",
 			indiv.genes.len()
 		);
-		// TODO assemble WasmGenes and then add in
-		todo!()
+		let ident = WasmGene {
+			instr: ident,
+			marker: InnovNum(0), // TODO get from ctx
+			popty: vec![].into(),
+			pushty: vec![ty].into(),
+		};
+		let op = WasmGene {
+			instr: op,
+			marker: InnovNum(0), // TODO
+			popty: vec![ty, ty].into(),
+			pushty: vec![ty].into(),
+		};
+		indiv.genes.insert(loc, op); // OPT- insert multiple
+		indiv.genes.insert(loc, ident); // in reverse order
 	}
 }
 
