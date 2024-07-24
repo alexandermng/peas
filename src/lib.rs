@@ -13,4 +13,7 @@ pub mod wasm {
 	pub use genome::*;
 }
 
-pub use crate::wasm::*;
+pub mod prelude {
+	pub use crate::genetic::{Problem, Solution};
+	pub use crate::wasm::*;
+}

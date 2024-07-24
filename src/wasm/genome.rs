@@ -8,7 +8,10 @@ use std::{
 };
 
 use eyre::{eyre, Result};
-use wasm_encoder::{Instruction, PrimitiveValType, ValType};
+use wasm_encoder::{
+	CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction, Module,
+	PrimitiveValType, TypeSection, ValType,
+};
 
 use crate::genetic::Genome;
 
@@ -32,19 +35,68 @@ impl Display for InnovNum {
 	}
 }
 
+/// The type of a value on the stack
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum StackValType {
+	Bool,
+	U8, // unsigned integer
+	I8, // signed integer
+	U32,
+	I32,
+	U64,
+	I64,
+	F32, // float
+	F64,
+	// TODO mem/ref types
+}
+
+/// A gene of the Wasm Genome, holding its type and historical marker.
+#[derive(Clone, Debug)]
 pub struct WasmGene<'a> {
 	pub instr: Instruction<'a>,
-	pub popty: Cow<'a, [PrimitiveValType]>,
-	pub pushty: Cow<'a, [PrimitiveValType]>,
+	pub popty: Cow<'a, [StackValType]>, // OPT: global append-only cache
+	pub pushty: Cow<'a, [StackValType]>,
 	pub marker: InnovNum,
 }
 
+impl<'a> WasmGene<'a> {
+	pub fn new(instr: Instruction<'a>, marker: InnovNum) -> Self {
+		use Instruction::*;
+		use StackValType::*;
+		let (popty, pushty) = match &instr {
+			I32Add | I32Sub | I32Mul | I32DivS | I32RemS | I32And | I32Or | I32Xor => {
+				(vec![I32, I32], vec![I32])
+			}
+			I32Eqz => (vec![I32], vec![Bool]),
+			// TODO fill rest... also consider adding an argument informing about current stack
+			_ => unimplemented!("instruction type not supported"),
+		};
+		Self {
+			instr,
+			popty: popty.into(),
+			pushty: pushty.into(),
+			marker,
+		}
+	}
+
+	/// Check type-equality.
+	pub fn ty_eq(&self, other: &Self) -> bool {
+		Iterator::eq(self.popty.iter(), other.popty.iter())
+			&& Iterator::eq(self.pushty.iter(), other.pushty.iter())
+	}
+}
+
+impl<'a> PartialEq for WasmGene<'a> {
+	fn eq(&self, other: &Self) -> bool {
+		self.marker == other.marker
+	}
+}
+impl<'a> Eq for WasmGene<'a> {}
+
 /// The genome of a Wasm agent/individual, with additional genetic data. Can generate a Wasm Agent: bytecode whose
 /// phenotype is the solution for a particular problem.
+#[derive(Clone, Debug, Default)]
 pub struct WasmGenome {
-	// pub(crate) module: RefCell<walrus::Module>, // in progress module
-	// pub(crate) func: walrus::FunctionId,        // mutatable main (LocalFunction) in module
-	// pub(crate) markers: Vec<(usize, InnovNum)>, // markers for main, mapping their local pos to innovation number
 	pub genes: Vec<WasmGene<'static>>,
 	pub fitness: f64,
 }
@@ -124,21 +176,39 @@ impl WasmGenome {
 	// }
 
 	pub fn emit(&self) -> Vec<u8> {
-		// let mut module = self.module.borrow_mut();
-		// #[derive(Debug)]
-		// struct Fitness(f64);
-		// impl CustomSection for Fitness {
-		// 	fn name(&self) -> &str {
-		// 		"fitness"
-		// 	}
-		// 	fn data(&self, _ids_to_indices: &walrus::IdsToIndices) -> std::borrow::Cow<[u8]> {
-		// 		std::borrow::Cow::Owned(self.0.to_string().into_bytes())
-		// 	}
-		// }
-		// module.customs.add(Fitness(self.fitness)); // TODO debug why cant i see
-		// module.producers.clear(); // it should rly skip this already tho :/
-		// module.emit_wasm()
-		todo!()
+		let mut modu = Module::new();
+		let types = {
+			let mut ts = TypeSection::new();
+			ts.function([ValType::I32, ValType::I32, ValType::I32], [ValType::I32]); // TODO fix hardcode
+			ts
+		};
+		let funcidx = 0;
+		let funcs = {
+			let mut fs = FunctionSection::new();
+			fs.function(funcidx);
+			fs
+		};
+		let expos = {
+			let mut es = ExportSection::new();
+			es.export("main", ExportKind::Func, 0);
+			es
+		};
+		let codes = {
+			let mut cs = CodeSection::new();
+			let mut func = Function::new([]);
+			for g in &self.genes {
+				// add instructions from genome
+				func.instruction(&g.instr);
+			}
+			func.instruction(&Instruction::End);
+			cs.function(&func);
+			cs
+		};
+		modu.section(&types)
+			.section(&funcs)
+			.section(&expos)
+			.section(&codes);
+		modu.finish()
 	}
 }
 
@@ -149,26 +219,6 @@ impl Genome for WasmGenome {
 
 	fn fitness(&self) -> f64 {
 		self.fitness
-	}
-}
-
-impl Clone for WasmGenome {
-	fn clone(&self) -> Self {
-		// let mut out = WasmGenome::from_binary(&self.emit()).unwrap(); // emitted module should be valid
-		// out.markers.clone_from(&self.markers);
-		// out.fitness.clone_from(&self.fitness);
-		// out
-		todo!()
-	}
-}
-
-impl Debug for WasmGenome {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("WasmGenome")
-			// .field("func", &self.func) // TODO
-			// .field("markers", &self.markers)
-			.field("fitness", &self.fitness)
-			.finish()
 	}
 }
 

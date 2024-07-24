@@ -1,7 +1,7 @@
 use std::{fs::File, io::Write};
 
 use eyre::{eyre, Result};
-use peas::WasmGenome;
+use peas::prelude::*;
 use wasm_encoder::ValType;
 // use walrus::{ir, ValType};
 use wasmtime::{Engine, Module};
