@@ -62,6 +62,20 @@ impl From<StackValType> for ValType {
 	}
 }
 
+
+//mapping isn't one-to-one so idk if this is fine
+impl From<ValType> for StackValType {
+	fn from(value: ValType) -> Self {
+		match value {
+		ValType::I32 => StackValType::I32,
+		ValType::I64 => StackValType::I64,
+		ValType::F32 => StackValType::I32,
+		ValType::F64 => StackValType::I64,
+		_ => todo!()
+		}
+	}
+}
+
 /// A gene of the Wasm Genome, holding its type and historical marker.
 #[derive(Clone, Debug)]
 pub struct WasmGene<'a> {
@@ -118,8 +132,8 @@ impl<'a> Eq for WasmGene<'a> {}
 pub struct WasmGenome {
 	pub genes: Vec<WasmGene<'static>>,
 	pub fitness: f64,
-	pub params: Vec<ValType>,
-	pub result: Vec<ValType>,
+	pub params: Vec<StackValType>,
+	pub result: Vec<StackValType>,
 
 	pub(crate) locals: Vec<StackValType>, // local variable types. includes params
 }
@@ -149,8 +163,8 @@ impl WasmGenome {
 		WasmGenome {
 			genes: Vec::new(),
 			fitness: 0.0,
-			params: Vec::new(),
-			result: Vec::new(),
+			params: if params.len() == 0 {Vec::new()} else {params.iter().map(|v| StackValType::from(v.clone())).collect()},
+			result: if result.len() == 0 {Vec::new()} else {result.iter().map(|v| StackValType::from(v.clone())).collect()},
 
 			locals: Vec::new(), // TODO clone params
 		}
@@ -211,7 +225,7 @@ impl WasmGenome {
 		let mut modu = Module::new();
 		let types = {
 			let mut ts = TypeSection::new();
-			ts.function(self.params.clone(), self.result.clone()); // TODO fix hardcode //DONE
+			ts.function(self.params.clone(), self.result.clone());
 			ts
 		};
 		let funcidx = 0;
