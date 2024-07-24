@@ -6,9 +6,10 @@ use rand::{
 	seq::SliceRandom,
 	Rng,
 };
+use wasm_encoder::Instruction;
 
-use crate::genetic::Mutator;
 use crate::wasm::{Context, WasmGenome};
+use crate::{genetic::Mutator, wasm::StackValType};
 
 /// Mutation by individual genes
 pub trait WasmMutator {
@@ -24,20 +25,19 @@ pub trait WasmMutator {
 
 impl<M: WasmMutator> Mutator<WasmGenome, Context> for M {
 	fn mutate(&self, ctx: &mut Context, mut indiv: WasmGenome) -> WasmGenome {
-		// let entry = indiv.func().entry_block();
-		// let valids = self.find_valids(&indiv);
-		// let rate = self.rate(ctx, &indiv);
-		// if valids.is_empty() || !ctx.rng.gen_bool(rate) {
-		// 	return indiv;
-		// }
-		// let chosen = *valids.choose(&mut ctx.rng).unwrap();
-		// self.mutate_gene(ctx, &mut indiv, chosen);
+		let valids = self.find_valids(&indiv);
+		let rate = self.rate(ctx, &indiv);
+		if valids.is_empty() || !ctx.rng.gen_bool(rate) {
+			return indiv;
+		}
+		let chosen = *valids.choose(&mut ctx.rng).unwrap();
+		self.mutate_gene(ctx, &mut indiv, chosen);
 
-		// indiv
-		todo!()
+		indiv
 	}
 }
 
+/// Adds an Operation after a random gene.
 pub struct NeutralAddOp {
 	rate: f64,
 }
@@ -48,8 +48,9 @@ impl NeutralAddOp {
 }
 impl WasmMutator for NeutralAddOp {
 	fn find_valids(&self, indiv: &WasmGenome) -> Vec<usize> {
-		log::debug!("NeutralAddOp found ({} valid / {} total) genes", -1, -1);
-		todo!()
+		let len = indiv.genes.len();
+		log::debug!("NeutralAddOp found ({len} valid / {len} total) genes");
+		(0..len).collect()
 	}
 
 	fn rate(&self, ctx: &mut Context, _: &WasmGenome) -> f64 {
@@ -57,40 +58,28 @@ impl WasmMutator for NeutralAddOp {
 	}
 
 	fn mutate_gene(&self, ctx: &mut Context, indiv: &mut WasmGenome, loc: usize) {
-		// static ALLOWED_OPS: [(BinaryOp, Value); 6] = [
-		// 	// (Operation, Identity constant)
-		// 	(BinaryOp::I32Add, Value::I32(0)), // + 0
-		// 	(BinaryOp::I32Sub, Value::I32(0)), // - 0
-		// 	(BinaryOp::I32Mul, Value::I32(1)), // * 1
-		// 	// (BinaryOp::I32DivS, Value::I32(1)),    // ÷ 1
-		// 	// (BinaryOp::I32RemS, Value::I32(1)),    // % 1
-		// 	(BinaryOp::I32And, Value::I32(-1i32)), // & 0xffffffff
-		// 	(BinaryOp::I32Or, Value::I32(0)),      // | 0x00000000
-		// 	(BinaryOp::I32Xor, Value::I32(0)),     // ^ 0x00000000
-
-		// 	                                       // ...etc
-		// ];
-		// let (op, ident) = *ALLOWED_OPS.choose(&mut ctx.rng).unwrap();
-
-		// log::debug!(
-		// 	"Adding Operation {op:?} at {loc} (within 0..{})",
-		// 	indiv.func().size()
-		// );
-		// // indiv.mark_at(
-		// // 	// wtf is this shit
-		// // 	loc,
-		// // 	ctx.innov(indiv.get_inno(loc), Instr::Const(Const { value: ident })),
-		// // );
-		// // indiv.mark_at(
-		// // 	loc + 1,
-		// // 	ctx.innov(indiv.get_inno(loc + 1), Instr::Binop(ir::Binop { op })),
-		// // );
-		// indiv
-		// 	.func_mut()
-		// 	.builder_mut()
-		// 	.func_body()
-		// 	.const_at(loc + 1, ident)
-		// 	.binop_at(loc + 2, op);
+		static I32_OPS: [(Instruction, i32); 6] = [
+			(Instruction::I32Add, 0),
+			(Instruction::I32Sub, 0),
+			(Instruction::I32Mul, 1),
+			// (Instruction::I32DivS, 1),
+			// (Instruction::I32RemS, 1),
+			(Instruction::I32And, 0),
+			(Instruction::I32Or, 0),
+			(Instruction::I32Xor, 0),
+		];
+		let (op, ident) = match indiv.genes[loc].ty() {
+			(_, &[StackValType::I32]) => {
+				let (op, i) = I32_OPS.choose(&mut ctx.rng).unwrap();
+				(op.clone(), Instruction::I32Const(*i))
+			} // anything that pushes an I32
+			_ => unimplemented!("unrecognized gene type"),
+		};
+		log::debug!(
+			"Adding Operation {op:?} at {loc} (within 0..{})",
+			indiv.genes.len()
+		);
+		// TODO assemble WasmGenes and then add in
 		todo!()
 	}
 }

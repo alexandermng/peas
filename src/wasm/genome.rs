@@ -50,13 +50,26 @@ pub enum StackValType {
 	// TODO mem/ref types
 }
 
+impl From<StackValType> for ValType {
+	fn from(value: StackValType) -> Self {
+		use StackValType::*;
+		match value {
+			Bool | U8 | I8 | U32 | I32 => ValType::I32,
+			U64 | I64 => ValType::I64,
+			F32 => ValType::F32,
+			F64 => ValType::F64,
+		}
+	}
+}
+
 /// A gene of the Wasm Genome, holding its type and historical marker.
 #[derive(Clone, Debug)]
 pub struct WasmGene<'a> {
 	pub instr: Instruction<'a>,
-	pub popty: Cow<'a, [StackValType]>, // OPT: global append-only cache
-	pub pushty: Cow<'a, [StackValType]>,
 	pub marker: InnovNum,
+
+	popty: Cow<'a, [StackValType]>, // OPT: global append-only cache
+	pushty: Cow<'a, [StackValType]>,
 }
 
 impl<'a> WasmGene<'a> {
@@ -77,6 +90,11 @@ impl<'a> WasmGene<'a> {
 			pushty: pushty.into(),
 			marker,
 		}
+	}
+
+	/// Get the type of this instruction
+	pub fn ty(&self) -> (&[StackValType], &[StackValType]) {
+		(&self.popty, &self.pushty)
 	}
 
 	/// Check type-equality.
