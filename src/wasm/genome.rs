@@ -120,6 +120,8 @@ pub struct WasmGenome {
 	pub fitness: f64,
 	pub params: Vec<ValType>,
 	pub result: Vec<ValType>,
+
+	pub(crate) locals: Vec<StackValType>, // local variable types. includes params
 }
 
 impl WasmGenome {
@@ -149,6 +151,8 @@ impl WasmGenome {
 			fitness: 0.0,
 			params: Vec::new(),
 			result: Vec::new(),
+
+			locals: Vec::new(), // TODO clone params
 		}
 	}
 
@@ -223,7 +227,7 @@ impl WasmGenome {
 		};
 		let codes = {
 			let mut cs = CodeSection::new();
-			let mut func = Function::new([]);
+			let mut func = Function::new([]); // TODO add locals (map from self.locals)
 			for g in &self.genes {
 				// add instructions from genome
 				func.instruction(&g.instr);

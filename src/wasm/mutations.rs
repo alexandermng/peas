@@ -110,8 +110,24 @@ impl SwapRoot {
 }
 impl WasmMutator for SwapRoot {
 	fn find_valids(&self, indiv: &WasmGenome) -> Vec<usize> {
-		log::debug!("SwapRoot found ({} valid / {} total) genes", -1, -1);
-		todo!()
+		let out: Vec<usize> = indiv
+			.genes
+			.iter()
+			.enumerate()
+			.filter_map(|(i, g)| {
+				use Instruction::*;
+				match g.instr {
+					LocalGet(_) | I32Const(_) | F32Const(_) | I64Const(_) | F64Const(_) => Some(i), // equivalently checks popty is [] and pushty is [_; 1]
+					_ => None,
+				}
+			})
+			.collect();
+		log::debug!(
+			"SwapRoot found ({} valid / {} total) genes",
+			out.len(),
+			indiv.genes.len()
+		);
+		out
 	}
 
 	fn rate(&self, ctx: &mut Context, _: &WasmGenome) -> f64 {
@@ -119,26 +135,16 @@ impl WasmMutator for SwapRoot {
 	}
 
 	fn mutate_gene(&self, ctx: &mut Context, indiv: &mut WasmGenome, loc: usize) {
-		// let entry = indiv.func().entry_block();
-		// let instr = match ctx.rng.gen_range(0f64..=1f64) {
-		// 	0.0..=0.6 => {
-		// 		let local = *indiv.func().args.choose(&mut ctx.rng).unwrap();
-		// 		Instr::LocalGet(LocalGet { local })
-		// 	}
-		// 	0.6..=1.0 => {
-		// 		let value = Value::I32(ctx.rng.gen());
-		// 		Instr::Const(Const { value })
-		// 	}
-		// 	_ => unreachable!("we don't generate outside handled range"),
-		// };
-		// log::debug!(
-		// 	"Swapping {:?} into {:?}",
-		// 	indiv.func().block(entry)[loc].0,
-		// 	instr
-		// );
+		let i32opts = {
+			let mut opts = vec![Instruction::I32Const(0)]; // TODO add hardcoded consts. what constants are valid?
+											   // opts.append(indiv.locals); // TODO filter locals for same type and then add
+			opts
+		}; // for StackValType::I32
 
-		// indiv.func_mut().block_mut(entry)[loc].0 = instr;
-		todo!()
+		let root = match indiv.genes[loc].ty().1[0] {
+			StackValType::I32 => todo!(), // TODO figure out rates. equal weight for consts and locals?
+			_ => unimplemented!("unexpected stack value type"),
+		};
 	}
 }
 
