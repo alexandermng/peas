@@ -184,7 +184,8 @@ impl WasmGenome {
 	// 		.unwrap_local_mut()
 	// }
 
-	// TODO(AN): .replace(0, ...)
+	// TODO(AN): .replace(0, ...) and .insert(0, ...)
+	// pub fn replace(idx: usize, p: IntoGeneSeq) -> ??? {}
 
 	// /// Retrieve the local position by global innovation number.
 	// pub fn get_instr(&self, inno: InnovNum) -> usize {
@@ -253,6 +254,13 @@ impl Genome for WasmGenome {
 
 	fn fitness(&self) -> f64 {
 		self.fitness
+	}
+}
+
+impl Deref for WasmGenome {
+	type Target = [WasmGene<'static>];
+	fn deref(&self) -> &Self::Target {
+		&self.genes
 	}
 }
 
