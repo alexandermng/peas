@@ -48,7 +48,7 @@ impl NeutralAddOp {
 }
 impl WasmMutator for NeutralAddOp {
 	fn find_valids(&self, indiv: &WasmGenome) -> Vec<usize> {
-		let len = indiv.genes.len();
+		let len = indiv.len();
 		log::debug!("NeutralAddOp found ({len} valid / {len} total) genes");
 		(0..len).collect()
 	}
@@ -68,7 +68,7 @@ impl WasmMutator for NeutralAddOp {
 			(Instruction::I32Or, 0),
 			(Instruction::I32Xor, 0),
 		];
-		let (ty, op, ident) = match indiv.genes[loc].ty() {
+		let (ty, op, ident) = match indiv[loc].ty() {
 			(
 				_,
 				ty @ &[StackValType::U8 | StackValType::I8 | StackValType::U32 | StackValType::I32],
@@ -81,7 +81,7 @@ impl WasmMutator for NeutralAddOp {
 		};
 		log::debug!(
 			"Adding Operation {op:?} at {loc} (within 0..{})",
-			indiv.genes.len()
+			indiv.len()
 		);
 		let ident = WasmGene {
 			instr: ident,
@@ -95,8 +95,7 @@ impl WasmMutator for NeutralAddOp {
 			popty: vec![ty, ty].into(),
 			pushty: vec![ty].into(),
 		};
-		indiv.genes.insert(loc, op); // OPT- insert multiple
-		indiv.genes.insert(loc, ident); // in reverse order
+		let _: Vec<_> = indiv.genes.splice(loc..loc, [ident, op]).collect();
 	}
 }
 
@@ -125,7 +124,7 @@ impl WasmMutator for SwapRoot {
 		log::debug!(
 			"SwapRoot found ({} valid / {} total) genes",
 			out.len(),
-			indiv.genes.len()
+			indiv.len()
 		);
 		out
 	}
@@ -135,16 +134,35 @@ impl WasmMutator for SwapRoot {
 	}
 
 	fn mutate_gene(&self, ctx: &mut Context, indiv: &mut WasmGenome, loc: usize) {
+		let pushty = indiv[loc].ty().1[0];
 		let i32opts = {
-			let mut opts = vec![Instruction::I32Const(0)]; // TODO add hardcoded consts. what constants are valid?
-											   // opts.append(indiv.locals); // TODO filter locals for same type and then add
+			let mut opts = vec![
+				Instruction::I32Const(0),
+				Instruction::I32Const(1),
+				Instruction::I32Const(2),
+				Instruction::I32Const(-1),
+			]; // TODO consider what consts are valid
+			opts.extend(indiv.locals.iter().enumerate().filter_map(|(i, &t)| {
+				if t == pushty {
+					Some(Instruction::LocalGet(i as u32))
+				} else {
+					None
+				}
+			}));
 			opts
 		}; // for StackValType::I32
 
-		let root = match indiv.genes[loc].ty().1[0] {
-			StackValType::I32 => todo!(), // TODO figure out rates. equal weight for consts and locals?
+		let root = match pushty {
+			StackValType::I32 => i32opts.choose(&mut ctx.rng).unwrap().clone(), // TODO figure out rates. equal weight for consts and locals?
 			_ => unimplemented!("unexpected stack value type"),
 		};
+		let root = WasmGene {
+			instr: root,
+			marker: InnovNum(0),
+			popty: vec![].into(),
+			pushty: vec![pushty].into(),
+		};
+		let _: Vec<_> = indiv.genes.splice(loc..=loc, [root]).collect();
 	}
 }
 
