@@ -16,19 +16,18 @@ use rand::{
 };
 use rand_pcg::Pcg64Mcg;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use wasm_encoder::ValType;
+use wasm_encoder::{Instruction, ValType};
 use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
-// use wasm_encoder::{
-// 	CodeSection, Function, FunctionSection, Instruction, Module, TypeSection, ValType,
-// };
 
 use crate::genetic::{
 	self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Problem, Selector, Solution,
 };
 use crate::wasm::{
-	genome::{StackValType, WasmGene, WasmGenome},
+	genome::{InnovNum, StackValType, WasmGene, WasmGenome},
 	mutations::NeutralAddOp,
 };
+
+use super::mutations::MutationLog;
 
 /// Assembled phenotype of an individual in a genetic algorithm. Used as a solution to a problem.
 #[derive(Clone)]
@@ -74,15 +73,17 @@ where
 	}
 }
 
+type InnovKey = MutationLog;
+
 #[derive(Debug)]
 pub struct Context {
 	pub generation: usize, // current generation
 	pub max_fitness: f64,  // current top fitness
 	pub avg_fitness: f64,  // current mean fitness
 
-	pub(crate) rng: Pcg64Mcg, // reproducible rng
-	                          // innov_cnt: InnovNum,                     // innovation number count
-	                          // cur_innovs: HashMap<InnovKey, InnovNum>, // running log of current unique innovations, cleared per-generation.
+	pub(crate) rng: Pcg64Mcg,                // reproducible rng
+	innov_cnt: InnovNum,                     // innovation number count
+	cur_innovs: HashMap<InnovKey, InnovNum>, // running log of current unique innovations, cleared per-generation.
 }
 
 impl Context {
@@ -92,26 +93,23 @@ impl Context {
 			max_fitness: 0.0,
 			avg_fitness: 0.0,
 			rng: Pcg64Mcg::seed_from_u64(seed),
-			// innov_cnt: InnovNum(0),
-			// cur_innovs: HashMap::new(),
+			innov_cnt: InnovNum(0),
+			cur_innovs: HashMap::new(),
 		}
 	}
 
 	// /// Get or assign an innovation number to an innovation keyed by location of mutation and instruction added
-	// pub fn innov(&mut self, loc: InnovNum, instr: walrus::ir::Instr) -> InnovNum {
-	// 	*self
-	// 		.cur_innovs
-	// 		.entry(InnovKey(loc, instr))
-	// 		.or_insert_with(|| {
-	// 			let out = self.innov_cnt;
-	// 			*self.innov_cnt += 1;
-	// 			out
-	// 		})
-	// }
+	pub fn innov(&mut self, key: InnovKey) -> InnovNum {
+		*self.cur_innovs.entry(key).or_insert_with(|| {
+			let out = self.innov_cnt;
+			*self.innov_cnt += 1;
+			out
+		})
+	}
 
-	// pub fn num_innovs(&self) -> InnovNum {
-	// 	self.innov_cnt
-	// }
+	pub fn num_innovs(&self) -> InnovNum {
+		self.innov_cnt
+	}
 }
 
 /// A genetic algorithm for synthesizing WebAssembly modules to solve a problem. The problem must specify

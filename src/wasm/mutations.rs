@@ -1,12 +1,16 @@
 //! Possible mutations to our program
 
+use std::hash::Hash;
+use std::mem;
+
 use eyre::Result;
 use rand::{
 	distributions::{Bernoulli, Distribution, Uniform},
 	seq::SliceRandom,
 	Rng,
 };
-use wasm_encoder::Instruction;
+use wasm_encoder::{Encode, Instruction};
+use wasmparser::names;
 
 use crate::wasm::{Context, InnovNum, WasmGene, WasmGenome};
 use crate::{genetic::Mutator, wasm::StackValType};
@@ -36,6 +40,49 @@ impl<M: WasmMutator> Mutator<WasmGenome, Context> for M {
 		indiv
 	}
 }
+
+/// Logs where a mutation happened (previous innovnum and new instruction)
+#[derive(Debug)]
+pub enum MutationLog {
+	AddOp(InnovNum, Instruction<'static>),
+	SwapRoot(InnovNum, Instruction<'static>),
+}
+
+impl Hash for MutationLog {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		mem::discriminant(self).hash(state);
+		let (num, instr) = match self {
+			MutationLog::AddOp(n, i) => (n, i),
+			MutationLog::SwapRoot(n, i) => (n, i),
+		};
+		num.hash(state);
+		mem::discriminant(instr).hash(state);
+		match instr {
+			Instruction::LocalGet(u) => u.hash(state),
+			Instruction::I32Const(u) => u.hash(state),
+			_ => {}
+		};
+	}
+}
+
+impl PartialEq for MutationLog {
+	fn eq(&self, other: &Self) -> bool {
+		match (self, other) {
+			(
+				Self::AddOp(lnum, Instruction::LocalGet(lu)),
+				Self::AddOp(rnum, Instruction::LocalGet(ru)),
+			) => lnum == rnum && lu == ru,
+			(Self::AddOp(lnum, _), Self::AddOp(rnum, _)) => lnum == rnum,
+			(
+				Self::SwapRoot(lnum, Instruction::LocalGet(lu)),
+				Self::SwapRoot(rnum, Instruction::LocalGet(ru)),
+			) => lnum == rnum && lu == ru,
+			(Self::SwapRoot(lnum, _), Self::AddOp(rnum, _)) => lnum == rnum,
+			_ => false,
+		}
+	}
+}
+impl Eq for MutationLog {}
 
 /// Adds an Operation after a random gene.
 pub struct NeutralAddOp {
@@ -79,19 +126,19 @@ impl WasmMutator for NeutralAddOp {
 			} // anything that pushes an I32
 			_ => unimplemented!("unrecognized gene type"),
 		};
-		log::debug!(
-			"Adding Operation {op:?} at {loc} (within 0..{})",
-			indiv.len()
-		);
+
+		let mlog_1 = MutationLog::AddOp(indiv[loc].marker, ident.clone());
+		let mlog_2 = MutationLog::AddOp(indiv[loc].marker, op.clone());
+		log::debug!("Mutated {mlog_2:?}");
 		let ident = WasmGene {
 			instr: ident,
-			marker: InnovNum(0), // TODO get from ctx
+			marker: ctx.innov(mlog_1),
 			popty: vec![].into(),
 			pushty: vec![ty].into(),
 		};
 		let op = WasmGene {
 			instr: op,
-			marker: InnovNum(0), // TODO
+			marker: ctx.innov(mlog_2),
 			popty: vec![ty, ty].into(),
 			pushty: vec![ty].into(),
 		};
@@ -156,9 +203,11 @@ impl WasmMutator for SwapRoot {
 			StackValType::I32 => i32opts.choose(&mut ctx.rng).unwrap().clone(), // TODO figure out rates. equal weight for consts and locals?
 			_ => unimplemented!("unexpected stack value type"),
 		};
+		let mlog = MutationLog::SwapRoot(indiv[loc].marker, root.clone());
+		log::debug!("Mutated {mlog:?}");
 		let root = WasmGene {
 			instr: root,
-			marker: InnovNum(0),
+			marker: ctx.innov(mlog),
 			popty: vec![].into(),
 			pushty: vec![pushty].into(),
 		};
