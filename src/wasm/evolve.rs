@@ -493,7 +493,7 @@ where
 	enable_elitism: Option<bool>,
 	elitism_rate: Option<f64>,
 	enable_crossover: Option<bool>,
-	enable_speciation: Option<bool>
+	enable_speciation: Option<bool>,
 	crossover_rate: Option<f64>,
 	// crossover: Option<C>
 	mutation_rate: Option<f64>,
