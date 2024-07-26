@@ -127,6 +127,7 @@ where
 	enable_elitism: bool,
 	elitism_rate: f64,
 	enable_crossover: bool,
+	enable_speciation: bool,
 	crossover_rate: f64,
 	// crossover: C
 	mutation_rate: f64,
@@ -260,6 +261,11 @@ where
 			todo!() // TODO crossover selected
 		} else {
 			nextgen.append(&mut selected);
+		}
+
+		//TODO speciation
+		if self.enable_speciation {
+			todo!();
 		}
 
 		// Mutation
@@ -487,6 +493,7 @@ where
 	enable_elitism: Option<bool>,
 	elitism_rate: Option<f64>,
 	enable_crossover: Option<bool>,
+	enable_speciation: Option<bool>
 	crossover_rate: Option<f64>,
 	// crossover: Option<C>
 	mutation_rate: Option<f64>,
@@ -513,6 +520,7 @@ where
 			enable_elitism: self.enable_elitism.unwrap(),
 			elitism_rate: self.elitism_rate.unwrap_or_default(), // optional
 			enable_crossover: self.enable_crossover.unwrap(),
+			enable_speciation: self.enable_speciation.unwrap(),
 			crossover_rate: self.crossover_rate.unwrap_or_default(), // optional
 			mutation_rate: self.mutation_rate.unwrap(),
 			mutation: self.mutation.unwrap(),
@@ -557,6 +565,11 @@ where
 
 	pub fn enable_crossover(mut self, en: bool) -> Self {
 		self.enable_crossover = Some(en);
+		self
+	}
+
+	pub fn enable_speciation(mut self, en: bool) -> Self {
+		self.enable_speciation = Some(en);
 		self
 	}
 
@@ -610,6 +623,7 @@ where
 			enable_elitism: None,
 			elitism_rate: None,
 			enable_crossover: None,
+			enable_speciation: None,
 			crossover_rate: None,
 			mutation_rate: None,
 			mutation: None,
