@@ -6,6 +6,7 @@ use std::{
 	fs,
 	hash::{DefaultHasher, Hash, Hasher},
 	mem,
+	ops::Range,
 };
 
 use eyre::{eyre, DefaultHandler, OptionExt, Result};
@@ -25,7 +26,7 @@ use crate::genetic::{
 	self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Problem, Selector, Solution,
 };
 use crate::wasm::{
-	genome::{StackValType, WasmGenome, WasmGene},
+	genome::{StackValType, WasmGene, WasmGenome},
 	mutations::NeutralAddOp,
 };
 
@@ -326,7 +327,65 @@ where
 		todo!()
 	}
 
-	fn crossover(&self, a: &Self::G, b: &Self::G) -> Self::G {
+	fn crossover(&self, par_a: &Self::G, par_b: &Self::G) -> Self::G {
+		let len_a = par_a.len();
+		let len_b = par_b.len();
+		let mut matches: Vec<Range<usize>> = Vec::new(); // ranges into par_a
+		let mut disjoint: Vec<(Range<usize>, Range<usize>)> = Vec::new(); // (a, b)
+
+		let (mut cur_a, mut cur_b) = (0, 0); // current indices
+		let (mut last_a, mut last_b) = (0, 0); // index of last matches or disjoints
+		let mut matching = true; // true if currently matching, otherwise disjoint
+		while cur_a < len_a && cur_b < len_b {
+			if par_a[cur_a] == par_b[cur_b] {
+				if !matching {
+					disjoint.push((last_a..cur_a, last_b..cur_b)); // push disjoint range
+					matching = true; // start matching range
+					(last_a, last_b) = (cur_a, cur_b);
+				}
+				// cont matching range
+				cur_a += 1;
+				cur_b += 1;
+			}
+			// current disjoint
+			if matching {
+				matches.push(last_a..cur_a); // push matching range
+				matching = false; // start disjoint range
+				(last_a, last_b) = (cur_a, cur_b);
+			}
+			// cont disjoint range
+			if let Some(mat_b) = par_b[last_b..].iter().position(|b| *b == par_a[cur_a]) {
+				cur_b = mat_b; // found match, go next
+				continue;
+			}
+			cur_b += 1;
+		}
+		if cur_a != len_a || cur_b != len_b {
+			disjoint.push((cur_a..len_a, cur_b..len_b)); // at least one unfinished, disjoint at end
+		}
+
+		let mut ctx = self.ctx.borrow_mut();
+		let mut child: Vec<WasmGene> = Vec::with_capacity(len_a);
+		// will be [mat, dis, mat, dis,... mat?]
+		for (mat, (dis_a, dis_b)) in
+			Iterator::zip(matches.iter().cloned(), disjoint.iter().cloned())
+		{
+			child.extend(par_a[mat].iter().cloned());
+			let choice = *[&par_a[dis_a], &par_b[dis_b]].choose(&mut ctx.rng).unwrap(); // choose one or the other
+			child.extend(choice.iter().cloned());
+		}
+		if matches.len() > disjoint.len() {
+			let last = matches.last().unwrap().clone();
+			child.extend(par_a[last].iter().cloned());
+		}
+
+		WasmGenome {
+			genes: child,
+			fitness: 0.0,
+			params: par_a.params.clone(),
+			result: par_a.result.clone(),
+			locals: par_a.locals.clone(),
+		}
 		/*
 		first, extract the "genes" part of each wasm genome
 		Then, starting at the first gene, repeat this algorithm:
@@ -336,88 +395,85 @@ where
 		If a matching gene is not found, repeat this step with the next lowest innovation number gene until a match is found
 		Once a match is found, the captured genes are chosen based on which parent has the higher fitness (currently random) or randomly if fitness is equal
 		*/
-		let genesA = *a;
-		let genesB = *b;
+		// let len_a = par_a.len();
+		// let len_b = par_b.len();
+		// let mut child: Vec<WasmGene> = Vec::new();
 
-		let lenA: i32 = genesA.len() as i32;
-		let lenB: i32 = genesB.len() as i32;
+		// let mut idx_a = 0; // cur idx in a
+		// let mut last_a = 0; // idx of last match in a
+		// let mut idx_b = 0; // cur idx in b
+		// let mut last_b = 0; // idx of last match in b
 
-		let mut childgenes: Vec<WasmGene> = Vec::new();
+		// while idx_a < len_a && idx_b < len_b {
+		// 	if par_a[idx_a] == par_b[idx_b] {
+		// 		// add match to child
+		// 		child.push(par_a[idx_a]);
+		// 		last_a = idx_a;
+		// 		last_b = idx_b;
+		// 		idx_a += 1;
+		// 		idx_b += 1;
+		// 	} else {
+		// 		let mut found = false;
+		// 		let mut temp_A = idx_a;
+		// 		let mut temp_B = idx_b;
 
-		let mut pointerA: i32 = 0;
-		let mut lastA: i32 = -1;
-		let mut pointerB: i32 = 0;
-		let mut lastB: i32 = -1;
+		// 		if par_a[idx_a].marker > par_b[idx_b].marker {
+		// 			while idx_a < len_a && !found {
+		// 				if WasmGene::eq(&par_a[idx_a], &par_b[idx_b]) {
+		// 					found = true;
+		// 				} else {
+		// 					idx_a += 1;
+		// 				}
+		// 			}
+		// 		} else {
+		// 			while idx_b < len_b && !found {
+		// 				if WasmGene::eq(&par_a[idx_a], &par_b[idx_b]) {
+		// 					found = true;
+		// 				} else {
+		// 					idx_b += 1;
+		// 				}
+		// 			}
+		// 		}
 
-		while pointerA < lenA && pointerB < lenB {
-			if WasmGene::eq(&genesA[pointerA], &genesB[pointerB]) {
-				childgenes.push(genesA[pointerA]);
-				lastA = pointerA;
-				lastB = pointerB;
-				pointerA += 1;
-				pointerB += 1;
-			} else {
-				let mut found = false;
-				let mut temp_A = pointerA;
-				let mut temp_B = pointerB;
+		// 		if !found {
+		// 			idx_a = temp_A;
+		// 			idx_b = temp_B;
+		// 			if par_a[idx_a].marker > par_b[idx_b].marker {
+		// 				idx_b += 1;
+		// 			} else {
+		// 				idx_a += 1;
+		// 			}
+		// 			if !WasmGene::eq(&par_a[idx_a], &par_b[idx_b]) {
+		// 				continue;
+		// 			}
+		// 		}
 
-				if genesA[pointerA].marker > genesB[pointerB].marker {
-					while pointerA < lenA && !found {
-						if WasmGene::eq(&genesA[pointerA], &genesB[pointerB]) {
-							found = true;
-						} else {
-							pointerA += 1;
-						}
-					}
-				} else {
-					while pointerB < lenB && !found {
-						if WasmGene::eq(&genesA[pointerA], &genesB[pointerB]) {
-							found = true;
-						} else {
-							pointerB += 1;
-						}
-					}
-				}
+		// 		//success
+		// 		let mut rng = rand::thread_rng();
+		// 		if rng.gen_bool(0.5) {
+		// 			child.extend(par_a[last_a + 1..idx_a].iter().cloned());
+		// 		} else {
+		// 			child.extend(par_b[last_b + 1..idx_b].iter().cloned());
+		// 		}
+		// 		continue;
+		// 	}
+		// }
 
-				if !found {
-					pointerA = temp_A;
-					pointerB = temp_B;
-					if genesA[pointerA].marker > genesB[pointerB].marker {
-						pointerB += 1;
-					} else {
-						pointerA += 1;
-					}
-					if !WasmGene::eq(&genesA[pointerA], &genesB[pointerB]) {
-						continue;
-					}
-				}
+		// if idx_a < len_a {
+		// 	child.extend(par_a[last_a + 1..len_a].iter().cloned());
+		// } else if idx_b < len_b {
+		// 	child.extend(par_b[last_b + 1..len_b].iter().cloned());
+		// }
 
-				//success
-				let mut rng = rand::thread_rng();
-				if rng.gen_bool(0.5) {
-					childgenes.extend(&genesA[lastA+1..pointerA]);
-				} else {
-					childgenes.extend(&genesB[lastB+1..pointerB]);
-				}
-				continue;
-			}
-		}
+		// //can probably be replaced with "new" function after further work on that
+		// WasmGenome {
+		// 	genes: child,
+		// 	fitness: 0.0,
+		// 	params: todo!(),
+		// 	result: todo!(),
 
-		if pointerA < lenA {
-			childgenes.extend(&genesA[lastA+1..lenA]);
-		} else if pointerB < lenB {
-			childgenes.extend(&genesB[lastB+1..lenB]);
-		}
-		
-		//can probably be replaced with "new" function after further work on that
-		WasmGenome {
-			genes: childgenes,
-			fitness: 0.0,
-			params: todo!(),
-			result: todo!(),
-
-			locals: todo!(),
-		}
+		// 	locals: todo!(),
+		// }
 	}
 }
 
