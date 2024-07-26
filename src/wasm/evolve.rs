@@ -25,7 +25,7 @@ use crate::genetic::{
 	self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Problem, Selector, Solution,
 };
 use crate::wasm::{
-	genome::{StackValType, WasmGenome},
+	genome::{StackValType, WasmGenome, WasmGene},
 	mutations::NeutralAddOp,
 };
 
@@ -327,7 +327,97 @@ where
 	}
 
 	fn crossover(&self, a: &Self::G, b: &Self::G) -> Self::G {
-		todo!()
+		/*
+		first, extract the "genes" part of each wasm genome
+		Then, starting at the first gene, repeat this algorithm:
+		If the corresponding genes match, clone into the child
+		If they do not match, check which one has the lower innovation number
+		Iterate through the other genome until a matching gene is found
+		If a matching gene is not found, repeat this step with the next lowest innovation number gene until a match is found
+		Once a match is found, the captured genes are chosen based on which parent has the higher fitness (currently random) or randomly if fitness is equal
+		*/
+		let genesA = *a;
+		let genesB = *b;
+
+		let lenA: i32 = genesA.len() as i32;
+		let lenB: i32 = genesB.len() as i32;
+
+		let mut childgenes: Vec<WasmGene> = Vec::new();
+
+		let mut pointerA: i32 = 0;
+		let mut lastA: i32 = -1;
+		let mut pointerB: i32 = 0;
+		let mut lastB: i32 = -1;
+
+		while pointerA < lenA && pointerB < lenB {
+			if WasmGene::eq(&genesA[pointerA], &genesB[pointerB]) {
+				childgenes.push(genesA[pointerA]);
+				lastA = pointerA;
+				lastB = pointerB;
+				pointerA += 1;
+				pointerB += 1;
+			} else {
+				let mut found = false;
+				let mut temp_A = pointerA;
+				let mut temp_B = pointerB;
+
+				if genesA[pointerA].marker > genesB[pointerB].marker {
+					while pointerA < lenA && !found {
+						if WasmGene::eq(&genesA[pointerA], &genesB[pointerB]) {
+							found = true;
+						} else {
+							pointerA += 1;
+						}
+					}
+				} else {
+					while pointerB < lenB && !found {
+						if WasmGene::eq(&genesA[pointerA], &genesB[pointerB]) {
+							found = true;
+						} else {
+							pointerB += 1;
+						}
+					}
+				}
+
+				if !found {
+					pointerA = temp_A;
+					pointerB = temp_B;
+					if genesA[pointerA].marker > genesB[pointerB].marker {
+						pointerB += 1;
+					} else {
+						pointerA += 1;
+					}
+					if !WasmGene::eq(&genesA[pointerA], &genesB[pointerB]) {
+						continue;
+					}
+				}
+
+				//success
+				let mut rng = rand::thread_rng();
+				if rng.gen_bool(0.5) {
+					childgenes.extend(&genesA[lastA+1..pointerA]);
+				} else {
+					childgenes.extend(&genesB[lastB+1..pointerB]);
+				}
+				continue;
+			}
+		}
+
+		if pointerA < lenA {
+			childgenes.extend(&genesA[lastA+1..lenA]);
+		} else if pointerB < lenB {
+			childgenes.extend(&genesB[lastB+1..lenB]);
+		}
+		
+		//can probably be replaced with "new" function after further work on that
+		WasmGenome {
+			genes: childgenes,
+			fitness: 0.0,
+			params: todo!(),
+			result: todo!(),
+
+			locals: todo!(),
+		}
 	}
 }
 
