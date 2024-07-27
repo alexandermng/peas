@@ -11,8 +11,8 @@ use std::{
 
 use eyre::{eyre, DefaultHandler, OptionExt, Result};
 use rand::{
-	seq::{IteratorRandom, SliceRandom},
-	Rng, SeedableRng,
+	seq::{IteratorRandom, SliceRandom, index::sample},
+	Rng, SeedableRng, thread_rng,
 };
 use rand_pcg::Pcg64Mcg;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -246,6 +246,11 @@ where
 			}
 		}
 
+		//TODO speciation
+		if self.enable_speciation {
+			todo!();
+		}
+
 		// TODO extract selection
 		let mut selected = self
 			.selection
@@ -256,16 +261,23 @@ where
 		);
 
 		if self.enable_crossover {
-			let crossover_cnt = (self.crossover_rate * (self.pop_size as f64)) as usize;
+			let mut crossover_cnt = (self.crossover_rate * (self.pop_size as f64)) as usize;
+
+			//this may not be necessary
+			if crossover_cnt > selected.len() {
+				crossover_cnt = selected.len();
+			}
 			log::info!("Crossing over {crossover_cnt} individuals.");
-			todo!() // TODO crossover selected
+
+			//crossover algorithm: i'm just picking randomly for now
+			for n in 0..crossover_cnt {
+				let mut rng = thread_rng();
+				let indices = sample(&mut rng, selected.len(), 2);
+
+				nextgen.push(self.crossover(&selected[indices.index(0)], &selected[indices.index(1)]));
+			}
 		} else {
 			nextgen.append(&mut selected);
-		}
-
-		//TODO speciation
-		if self.enable_speciation {
-			todo!();
 		}
 
 		// Mutation
@@ -520,7 +532,7 @@ where
 			enable_elitism: self.enable_elitism.unwrap(),
 			elitism_rate: self.elitism_rate.unwrap_or_default(), // optional
 			enable_crossover: self.enable_crossover.unwrap(),
-			enable_speciation: self.enable_speciation.unwrap(),
+			enable_speciation: self.enable_speciation.unwrap_or_default(),
 			crossover_rate: self.crossover_rate.unwrap_or_default(), // optional
 			mutation_rate: self.mutation_rate.unwrap(),
 			mutation: self.mutation.unwrap(),
