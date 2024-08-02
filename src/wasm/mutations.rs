@@ -44,8 +44,9 @@ impl<M: WasmMutator> Mutator<WasmGenome, Context> for M {
 /// Logs where a mutation happened (previous innovnum and new instruction)
 #[derive(Debug)]
 pub enum MutationLog {
-	AddOp(InnovNum, Instruction<'static>),
-	SwapRoot(InnovNum, Instruction<'static>),
+	AddOp(InnovNum, Instruction<'static>), // AddOp added after gene @ InnovNum, with Op instruction
+	SwapRoot(InnovNum, Instruction<'static>), // SwapRoot swapping from gene @ InnovNum, with new instruction
+	Unique(&'static str),                     // unique mutations
 }
 
 impl Hash for MutationLog {
@@ -54,6 +55,10 @@ impl Hash for MutationLog {
 		let (num, instr) = match self {
 			MutationLog::AddOp(n, i) => (n, i),
 			MutationLog::SwapRoot(n, i) => (n, i),
+			MutationLog::Unique(s) => {
+				s.hash(state);
+				return;
+			}
 		};
 		num.hash(state);
 		mem::discriminant(instr).hash(state);
@@ -78,6 +83,7 @@ impl PartialEq for MutationLog {
 				Self::SwapRoot(rnum, Instruction::LocalGet(ru)),
 			) => lnum == rnum && lu == ru,
 			(Self::SwapRoot(lnum, _), Self::AddOp(rnum, _)) => lnum == rnum,
+			(Self::Unique(ls), Self::Unique(rs)) => ls == rs,
 			_ => false,
 		}
 	}
@@ -142,7 +148,7 @@ impl WasmMutator for NeutralAddOp {
 			popty: vec![ty, ty].into(),
 			pushty: vec![ty].into(),
 		};
-		let _: Vec<_> = indiv.genes.splice(loc..loc, [ident, op]).collect();
+		indiv.insert(loc, [ident, op]);
 	}
 }
 
@@ -211,7 +217,7 @@ impl WasmMutator for SwapRoot {
 			popty: vec![].into(),
 			pushty: vec![pushty].into(),
 		};
-		let _: Vec<_> = indiv.genes.splice(loc..=loc, [root]).collect();
+		indiv.replace(loc..=loc, [root]);
 	}
 }
 

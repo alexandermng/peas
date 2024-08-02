@@ -4,7 +4,7 @@ use std::{
 	borrow::Cow,
 	cell::{Ref, RefCell},
 	fmt::{Debug, Display},
-	ops::{Deref, DerefMut},
+	ops::{Deref, DerefMut, RangeBounds},
 };
 
 use eyre::{eyre, Result};
@@ -95,6 +95,7 @@ impl<'a> WasmGene<'a> {
 				(vec![I32, I32], vec![I32])
 			}
 			I32Eqz => (vec![I32], vec![Bool]),
+			I32Const(_) => (vec![], vec![I32]),
 			// TODO fill rest... also consider adding an argument informing about current stack
 			_ => unimplemented!("instruction type not supported"),
 		};
@@ -186,6 +187,23 @@ impl WasmGenome {
 
 	// TODO(AN): .replace(0, ...) and .insert(0, ...)
 	// pub fn replace(idx: usize, p: IntoGeneSeq) -> ??? {}
+
+	/// Insert genes into the genome after a specified index.
+	pub fn insert<I>(&mut self, idx: usize, genes: I)
+	where
+		I: IntoIterator<Item = WasmGene<'static>>,
+	{
+		let _: Vec<_> = self.genes.splice((idx + 1)..(idx + 1), genes).collect();
+	}
+
+	/// Replace genes in a range with the given genes. Returns removed genes.
+	pub fn replace<R, I>(&mut self, range: R, genes: I) -> Vec<WasmGene<'static>>
+	where
+		R: RangeBounds<usize>,
+		I: IntoIterator<Item = WasmGene<'static>>,
+	{
+		self.genes.splice(range, genes).collect()
+	}
 
 	// /// Retrieve the local position by global innovation number.
 	// pub fn get_instr(&self, inno: InnovNum) -> usize {

@@ -5,13 +5,16 @@
 use peas::{
 	genetic::{Mutator, OnceMutator, Problem, Solution},
 	selection::TournamentSelection,
-	wasm::mutations::{NeutralAddOp, SequenceMutator, SwapRoot},
-	wasm::{Context, WasmGenAlgBuilder, WasmGenome},
+	wasm::{
+		mutations::{MutationLog, NeutralAddOp, SequenceMutator, SwapRoot},
+		Context, WasmGenAlgBuilder, WasmGene, WasmGenome,
+	},
 };
 use rand::{
 	distributions::{Distribution, Uniform},
 	thread_rng, Rng,
 };
+use wasm_encoder::Instruction;
 // use rayon::prelude::*;
 
 struct Sum3 {
@@ -70,7 +73,13 @@ fn main() {
 		                               // SwapOp::with_rate(0.02),
 		                               // AddTee::with_rate(0.02),
 	];
-	let init = |_ctx: &mut Context, mut g: WasmGenome| -> WasmGenome { todo!() };
+	let init = |ctx: &mut Context, mut g: WasmGenome| -> WasmGenome {
+		g.genes.push(WasmGene::new(
+			Instruction::I32Const(0),
+			ctx.innov(MutationLog::Unique("seed")),
+		));
+		g
+	};
 	let mut ga = WasmGenAlgBuilder::default()
 		.problem(prob)
 		.pop_size(100)

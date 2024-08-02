@@ -11,8 +11,8 @@ use std::{
 
 use eyre::{eyre, DefaultHandler, OptionExt, Result};
 use rand::{
-	seq::{IteratorRandom, SliceRandom, index::sample},
-	Rng, SeedableRng, thread_rng,
+	seq::{index::sample, IteratorRandom, SliceRandom},
+	thread_rng, Rng, SeedableRng,
 };
 use rand_pcg::Pcg64Mcg;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -40,7 +40,13 @@ pub struct Agent {
 
 impl Agent {
 	fn new(engine: Engine, binary: &[u8]) -> Self {
-		let module = Module::from_binary(&engine, binary).unwrap();
+		let module = match Module::from_binary(&engine, binary) {
+			Ok(o) => o,
+			Err(err) => {
+				log::error!("Invalid Agent: {binary:?}");
+				panic!("{err:?}")
+			}
+		};
 		Agent { engine, module }
 	}
 }
@@ -261,20 +267,16 @@ where
 		);
 
 		if self.enable_crossover {
+			let mut ctx = self.ctx.borrow_mut();
 			let mut crossover_cnt = (self.crossover_rate * (self.pop_size as f64)) as usize;
-
-			//this may not be necessary
-			if crossover_cnt > selected.len() {
-				crossover_cnt = selected.len();
-			}
 			log::info!("Crossing over {crossover_cnt} individuals.");
 
 			//crossover algorithm: i'm just picking randomly for now
 			for n in 0..crossover_cnt {
-				let mut rng = thread_rng();
-				let indices = sample(&mut rng, selected.len(), 2);
+				let indices = sample(&mut ctx.rng, selected.len(), 2); // with replacement (?)
 
-				nextgen.push(self.crossover(&selected[indices.index(0)], &selected[indices.index(1)]));
+				nextgen
+					.push(self.crossover(&selected[indices.index(0)], &selected[indices.index(1)]));
 			}
 		} else {
 			nextgen.append(&mut selected);
@@ -309,10 +311,11 @@ where
 			"Created generation {} (size {}). {} new innovations; {} total innovations.",
 			ctx.generation,
 			self.pop_size,
-			0, // ctx.cur_innovs.len(),
-			0, // ctx.innov_cnt,
+			ctx.cur_innovs.len(),
+			ctx.innov_cnt,
 		);
-		// ctx.cur_innovs.clear();
+		log::debug!("Innovations were: {:?}", ctx.cur_innovs);
+		ctx.cur_innovs.clear();
 		true
 	}
 
@@ -571,6 +574,7 @@ where
 	}
 
 	pub fn elitism_rate(mut self, rate: f64) -> Self {
+		assert!((0.0..=1.0).contains(&rate), "rate must be in [0, 1]");
 		self.elitism_rate = Some(rate);
 		self
 	}
@@ -586,11 +590,13 @@ where
 	}
 
 	pub fn crossover_rate(mut self, rate: f64) -> Self {
+		assert!((0.0..=1.0).contains(&rate), "rate must be in [0, 1]");
 		self.crossover_rate = Some(rate);
 		self
 	}
 
 	pub fn mutation_rate(mut self, rate: f64) -> Self {
+		assert!((0.0..=1.0).contains(&rate), "rate must be in [0, 1]");
 		self.mutation_rate = Some(rate);
 		self
 	}
