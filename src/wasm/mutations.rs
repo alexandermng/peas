@@ -188,25 +188,34 @@ impl WasmMutator for SwapRoot {
 
 	fn mutate_gene(&self, ctx: &mut Context, indiv: &mut WasmGenome, loc: usize) {
 		let pushty = indiv[loc].ty().1[0];
-		let i32opts = {
-			let mut opts = vec![
-				Instruction::I32Const(0),
-				Instruction::I32Const(1),
-				Instruction::I32Const(2),
-				Instruction::I32Const(-1),
-			]; // TODO consider what consts are valid
-			opts.extend(indiv.locals.iter().enumerate().filter_map(|(i, &t)| {
+		let i32consts: Vec<Instruction> = vec![
+			// TODO consider other consts?
+			Instruction::I32Const(0),
+			Instruction::I32Const(1),
+			Instruction::I32Const(2),
+			Instruction::I32Const(-1),
+		]; // for StackValType::I32
+		let i32vars: Vec<Instruction> = indiv
+			.locals
+			.iter()
+			.enumerate()
+			.filter_map(|(i, &t)| {
 				if t == pushty {
 					Some(Instruction::LocalGet(i as u32))
 				} else {
 					None
 				}
-			}));
-			opts
-		}; // for StackValType::I32
+			})
+			.collect(); // for StackValType::I32
 
 		let root = match pushty {
-			StackValType::I32 => i32opts.choose(&mut ctx.rng).unwrap().clone(), // TODO figure out rates. equal weight for consts and locals?
+			StackValType::I32 => {
+				let do_var = !i32vars.is_empty() && ctx.rng.gen_bool(0.6);
+				if do_var { i32vars } else { i32consts }
+					.choose(&mut ctx.rng)
+					.unwrap()
+					.clone()
+			}
 			_ => unimplemented!("unexpected stack value type"),
 		};
 		let mlog = MutationLog::SwapRoot(indiv[loc].marker, root.clone());
