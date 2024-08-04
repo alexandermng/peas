@@ -11,6 +11,8 @@ use std::{
 
 use eyre::{eyre, DefaultHandler, OptionExt, Result};
 use rand::{
+	distributions::Uniform,
+	prelude::Distribution,
 	seq::{index::sample, IteratorRandom, SliceRandom},
 	thread_rng, Rng, SeedableRng,
 };
@@ -267,16 +269,24 @@ where
 		);
 
 		if self.enable_crossover {
-			let mut ctx = self.ctx.borrow_mut();
 			let mut crossover_cnt = (self.crossover_rate * (self.pop_size as f64)) as usize;
 			log::info!("Crossing over {crossover_cnt} individuals.");
 
-			//crossover algorithm: i'm just picking randomly for now
-			for n in 0..crossover_cnt {
-				let indices = sample(&mut ctx.rng, selected.len(), 2); // with replacement (?)
+			let indices: Vec<_> = {
+				let mut ctx = self.ctx.borrow_mut();
+				let dist = Uniform::new(0, selected.len());
+				(0..crossover_cnt)
+					.map(|_| {
+						let a = dist.sample(&mut ctx.rng);
+						let b = dist.sample(&mut ctx.rng);
+						(a, b)
+					})
+					.collect()
+			};
 
-				nextgen
-					.push(self.crossover(&selected[indices.index(0)], &selected[indices.index(1)]));
+			for (a, b) in indices {
+				let child = self.crossover(&selected[a], &selected[b]);
+				nextgen.push(child);
 			}
 		} else {
 			nextgen.append(&mut selected);
@@ -382,6 +392,7 @@ where
 		if cur_a != len_a || cur_b != len_b {
 			disjoint.push((cur_a..len_a, cur_b..len_b)); // at least one unfinished, disjoint at end
 		}
+		log::debug!("Found ranges: matching {matches:?} and disjoint {disjoint:?}");
 
 		let mut ctx = self.ctx.borrow_mut();
 		let mut child: Vec<WasmGene> = Vec::with_capacity(len_a);
@@ -389,8 +400,16 @@ where
 		for (mat, (dis_a, dis_b)) in
 			Iterator::zip(matches.iter().cloned(), disjoint.iter().cloned())
 		{
-			child.extend(par_a[mat].iter().cloned());
-			let choice = *[&par_a[dis_a], &par_b[dis_b]].choose(&mut ctx.rng).unwrap(); // choose one or the other
+			child.extend(par_a[mat].iter().cloned()); // get matching
+										  // then disjoint
+			let genes_a = &par_a[dis_a];
+			let genes_b = &par_b[dis_b];
+			let choice = if ctx.rng.gen_bool(0.5) {
+				genes_a
+			} else {
+				genes_b
+			};
+			// let choice = *[&par_a[dis_a], &par_b[dis_b]].choose(&mut ctx.rng).unwrap(); // choose one or the other
 			child.extend(choice.iter().cloned());
 		}
 		if matches.len() > disjoint.len() {
@@ -532,12 +551,12 @@ where
 			problem: self.problem.unwrap(),
 			pop_size: size,
 			selection: self.selection.unwrap(),
-			enable_elitism: self.enable_elitism.unwrap(),
-			elitism_rate: self.elitism_rate.unwrap_or_default(), // optional
+			enable_elitism: self.enable_elitism.unwrap_or_default(), // optional, default false
+			elitism_rate: self.elitism_rate.unwrap_or_default(),     // optional, default 0.0
 			enable_crossover: self.enable_crossover.unwrap(),
-			enable_speciation: self.enable_speciation.unwrap_or_default(),
-			crossover_rate: self.crossover_rate.unwrap_or_default(), // optional
-			mutation_rate: self.mutation_rate.unwrap(),
+			enable_speciation: self.enable_speciation.unwrap_or_default(), // optional, default false
+			crossover_rate: self.crossover_rate.unwrap_or_default(),       // optional, default 0.0
+			mutation_rate: self.mutation_rate.unwrap(),                    // TODO: use mutation rate
 			mutation: self.mutation.unwrap(),
 			init_genome: self.starter.unwrap(),
 			stop_cond: self

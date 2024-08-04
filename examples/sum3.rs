@@ -90,8 +90,8 @@ fn main() {
 		.selection(TournamentSelection::new(0.8, 3, 0.9, false)) // can do real tournament selection when selection is fixed
 		.enable_elitism(true)
 		.elitism_rate(0.05)
-		.enable_crossover(false)
-		// .crossover_rate(0.8)
+		.enable_crossover(true)
+		.crossover_rate(0.8)
 		// .crossover()
 		.mutation_rate(1.0)
 		.mutation(SequenceMutator::from(&muts[..]))
