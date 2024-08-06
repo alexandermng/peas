@@ -76,7 +76,7 @@ impl From<ValType> for StackValType {
 }
 
 /// A gene of the Wasm Genome, holding its type and historical marker.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct WasmGene<'a> {
 	pub instr: Instruction<'a>,
 	pub marker: InnovNum,
@@ -125,6 +125,13 @@ impl<'a> PartialEq for WasmGene<'a> {
 	}
 }
 impl<'a> Eq for WasmGene<'a> {}
+
+impl<'a> Debug for WasmGene<'a> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "Gene[{}]:", self.marker)?;
+		self.instr.fmt(f)
+	}
+}
 
 /// The genome of a Wasm agent/individual, with additional genetic data. Can generate a Wasm Agent: bytecode whose
 /// phenotype is the solution for a particular problem.
@@ -261,7 +268,12 @@ impl WasmGenome {
 			.section(&funcs)
 			.section(&expos)
 			.section(&codes);
-		modu.finish()
+		let out = modu.finish();
+		assert!(
+			wasmparser::validate(&out).is_ok(),
+			"generated invalid module"
+		);
+		out
 	}
 }
 
@@ -286,7 +298,6 @@ impl Display for WasmGenome {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.write_str("Genome[")?;
 		for b in self.emit() {
-			// OPT: shed chaff, just core main code
 			write!(f, "{:X}", b)?;
 		}
 		f.write_str("]")
