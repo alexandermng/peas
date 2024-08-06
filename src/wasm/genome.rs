@@ -4,7 +4,7 @@ use std::{
 	borrow::Cow,
 	cell::{Ref, RefCell},
 	fmt::{Debug, Display},
-	ops::{Deref, DerefMut, RangeBounds},
+	ops::{Deref, DerefMut, Range, RangeBounds},
 };
 
 use eyre::{eyre, Result};
@@ -177,24 +177,6 @@ impl WasmGenome {
 		todo!()
 	}
 
-	// pub(crate) fn func<'a>(&'a self) -> Ref<walrus::LocalFunction> {
-	// 	Ref::map(self.module.borrow(), |m| {
-	// 		m.funcs.get(self.func).kind.unwrap_local()
-	// 	})
-	// }
-
-	// pub fn func_mut(&mut self) -> &mut walrus::LocalFunction {
-	// 	self.module
-	// 		.get_mut()
-	// 		.funcs
-	// 		.get_mut(self.func)
-	// 		.kind
-	// 		.unwrap_local_mut()
-	// }
-
-	// TODO(AN): .replace(0, ...) and .insert(0, ...)
-	// pub fn replace(idx: usize, p: IntoGeneSeq) -> ??? {}
-
 	/// Insert genes into the genome after a specified index.
 	pub fn insert<I>(&mut self, idx: usize, genes: I)
 	where
@@ -274,6 +256,82 @@ impl WasmGenome {
 			"generated invalid module"
 		);
 		out
+	}
+
+	/// Show the gene intersection ranges of this genome and another. Returns a tuple of (matches, disjoint),
+	/// where match ranges are of this genome's matching genes and disjoint ranges are a tuple of corresponding
+	/// (self, other) genes. Genes will be [mat, dis, mat, dis... mat?], starting with 0..0 if it starts disjoint.
+	pub(crate) fn intersect(
+		&self,
+		other: &Self,
+	) -> (Vec<Range<usize>>, Vec<(Range<usize>, Range<usize>)>) {
+		let len_a = self.len(); // par_a = self
+		let len_b = other.len(); // par_b = other
+		let mut matches = Vec::new();
+		let mut disjoint = Vec::new();
+
+		let (mut cur_a, mut cur_b) = (0, 0); // current indices
+		let (mut last_a, mut last_b) = (0, 0); // index of last matches or disjoints
+		let mut was_matching = true; // true if current range is matching, otherwise disjoint
+		loop {
+			let valid = cur_a < len_a && cur_b < len_b;
+			let matching = valid && (self[cur_a] == other[cur_b]); // short-circuit (useless when invalid)
+			match (valid, was_matching, matching) {
+				/* invalid */
+				(false, false, _) => {
+					// out of bounds while disjoint
+					disjoint.push((last_a..len_a, last_b..len_b)); // final disjoint
+					break;
+				}
+				(false, true, _) => {
+					// out of bounds while matching
+					matches.push(last_a..cur_a); // final match
+					if cur_a == len_a && cur_b == len_b {
+						break; // clean finish, no extra disjoint bits
+					}
+					was_matching = false;
+					(last_a, last_b) = (cur_a, cur_b);
+					// pass to (false, false, _)
+				}
+				/* valid */
+				(true, true, false) => {
+					// was matching, but now disjoint
+					// log::debug!("\t\tPushing match {last_a}..{cur_a}");
+					matches.push(last_a..cur_a); // push matching range
+					was_matching = false; // start disjoint range
+					(last_a, last_b) = (cur_a, cur_b);
+					// pass to (_, false, false)
+				}
+				(true, false, true) => {
+					// was disjoint, but now matching
+					disjoint.push((last_a..cur_a, last_b..cur_b)); // push disjoint range
+											   // log::debug!("\t\tPushing disjoint ({last_a}..{cur_a}, {last_b}..{cur_b})");
+					was_matching = true; // start matching range
+					(last_a, last_b) = (cur_a, cur_b);
+					// pass to (_, true, true)
+				}
+				(true, false, false) => {
+					// cont valid disjoint
+					if let Some(mat_b) = other[last_b..].iter().position(|b| *b == self[cur_a]) {
+						cur_b = last_b + mat_b; // found match, go next
+						debug_assert!(self[cur_a] == other[cur_b], "not real match");
+						continue; // pass to (true, false, true)
+					}
+					cur_a += 1;
+					// may invalidate a, => pass to (false, false, _)
+					// else pass to (true, false, ?)
+				}
+				(true, true, true) => {
+					// cont valid match
+					cur_a += 1;
+					cur_b += 1;
+					// may invalidate a or b, => pass to (false, true, _)
+					// else pass to (true, true, ?)
+				}
+			}
+		}
+		log::debug!("Found ranges for (0..{len_a}, 0..{len_b}): matching {matches:?} and disjoint {disjoint:?}");
+		(matches, disjoint)
 	}
 }
 

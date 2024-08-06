@@ -358,75 +358,10 @@ where
 
 	fn crossover(&self, par_a: &Self::G, par_b: &Self::G) -> Self::G {
 		log::debug!("Crossing over:\n\ta = {par_a:?}\n\tb = {par_b:?}");
-		let len_a = par_a.len();
-		let len_b = par_b.len();
-		let mut matches: Vec<Range<usize>> = Vec::new(); // ranges into par_a
-		let mut disjoint: Vec<(Range<usize>, Range<usize>)> = Vec::new(); // (a, b)
-
-		let (mut cur_a, mut cur_b) = (0, 0); // current indices
-		let (mut last_a, mut last_b) = (0, 0); // index of last matches or disjoints
-		let mut was_matching = true; // true if current range is matching, otherwise disjoint
-		loop {
-			let valid = cur_a < len_a && cur_b < len_b;
-			let matching = valid && (par_a[cur_a] == par_b[cur_b]); // short-circuit (useless when invalid)
-			match (valid, was_matching, matching) {
-				/* invalid */
-				(false, false, _) => {
-					// out of bounds while disjoint
-					disjoint.push((last_a..len_a, last_b..len_b)); // final disjoint
-					break;
-				}
-				(false, true, _) => {
-					// out of bounds while matching
-					matches.push(last_a..cur_a); // final match
-					if cur_a == len_a && cur_b == len_b {
-						break; // clean finish, no extra disjoint bits
-					}
-					was_matching = false;
-					(last_a, last_b) = (cur_a, cur_b);
-					// pass to (false, false, _)
-				}
-				/* valid */
-				(true, true, false) => {
-					// was matching, but now disjoint
-					// log::debug!("\t\tPushing match {last_a}..{cur_a}");
-					matches.push(last_a..cur_a); // push matching range
-					was_matching = false; // start disjoint range
-					(last_a, last_b) = (cur_a, cur_b);
-					// pass to (_, false, false)
-				}
-				(true, false, true) => {
-					// was disjoint, but now matching
-					disjoint.push((last_a..cur_a, last_b..cur_b)); // push disjoint range
-											   // log::debug!("\t\tPushing disjoint ({last_a}..{cur_a}, {last_b}..{cur_b})");
-					was_matching = true; // start matching range
-					(last_a, last_b) = (cur_a, cur_b);
-					// pass to (_, true, true)
-				}
-				(true, false, false) => {
-					// cont valid disjoint
-					if let Some(mat_b) = par_b[last_b..].iter().position(|b| *b == par_a[cur_a]) {
-						cur_b = last_b + mat_b; // found match, go next
-						debug_assert!(par_a[cur_a] == par_b[cur_b], "not real match");
-						continue; // pass to (true, false, true)
-					}
-					cur_a += 1;
-					// may invalidate a, => pass to (false, false, _)
-					// else pass to (true, false, ?)
-				}
-				(true, true, true) => {
-					// cont valid match
-					cur_a += 1;
-					cur_b += 1;
-					// may invalidate a or b, => pass to (false, true, _)
-					// else pass to (true, true, ?)
-				}
-			}
-		}
-		log::debug!("Found ranges for (0..{len_a}, 0..{len_b}): matching {matches:?} and disjoint {disjoint:?}");
+		let (matches, disjoint) = par_a.intersect(par_b);
 
 		let mut ctx = self.ctx.borrow_mut();
-		let mut child: Vec<WasmGene> = Vec::with_capacity(len_a);
+		let mut child: Vec<WasmGene> = Vec::with_capacity(par_a.len());
 		// will be [mat, dis, mat, dis,... mat?]
 		for (mat, (dis_a, dis_b)) in
 			Iterator::zip(matches.iter().cloned(), disjoint.iter().cloned())
