@@ -3,6 +3,7 @@
 use std::{
 	borrow::Cow,
 	cell::{Ref, RefCell},
+	cmp,
 	fmt::{Debug, Display},
 	ops::{Deref, DerefMut, Range, RangeBounds},
 };
@@ -133,6 +134,13 @@ impl<'a> Debug for WasmGene<'a> {
 	}
 }
 
+/// A comparison of two gene ranges among two genomes
+#[derive(Debug, Clone)]
+pub(crate) enum GeneDiff {
+	Match(Range<usize>),
+	Disjoint(Range<usize>, Range<usize>),
+}
+
 /// The genome of a Wasm agent/individual, with additional genetic data. Can generate a Wasm Agent: bytecode whose
 /// phenotype is the solution for a particular problem.
 #[derive(Clone, Debug, Default)]
@@ -251,7 +259,7 @@ impl WasmGenome {
 			.section(&expos)
 			.section(&codes);
 		let out = modu.finish();
-		assert!(
+		debug_assert!(
 			wasmparser::validate(&out).is_ok(),
 			"generated invalid module"
 		);
@@ -261,14 +269,10 @@ impl WasmGenome {
 	/// Show the gene intersection ranges of this genome and another. Returns a tuple of (matches, disjoint),
 	/// where match ranges are of this genome's matching genes and disjoint ranges are a tuple of corresponding
 	/// (self, other) genes. Genes will be [mat, dis, mat, dis... mat?], starting with 0..0 if it starts disjoint.
-	pub(crate) fn intersect(
-		&self,
-		other: &Self,
-	) -> (Vec<Range<usize>>, Vec<(Range<usize>, Range<usize>)>) {
+	pub(crate) fn diff(&self, other: &Self) -> Vec<GeneDiff> {
 		let len_a = self.len(); // par_a = self
 		let len_b = other.len(); // par_b = other
-		let mut matches = Vec::new();
-		let mut disjoint = Vec::new();
+		let mut diff = Vec::new();
 
 		let (mut cur_a, mut cur_b) = (0, 0); // current indices
 		let (mut last_a, mut last_b) = (0, 0); // index of last matches or disjoints
@@ -280,12 +284,12 @@ impl WasmGenome {
 				/* invalid */
 				(false, false, _) => {
 					// out of bounds while disjoint
-					disjoint.push((last_a..len_a, last_b..len_b)); // final disjoint
+					diff.push(GeneDiff::Disjoint(last_a..len_a, last_b..len_b)); // final disjoint
 					break;
 				}
 				(false, true, _) => {
 					// out of bounds while matching
-					matches.push(last_a..cur_a); // final match
+					diff.push(GeneDiff::Match(last_a..cur_a)); // final match
 					if cur_a == len_a && cur_b == len_b {
 						break; // clean finish, no extra disjoint bits
 					}
@@ -297,15 +301,15 @@ impl WasmGenome {
 				(true, true, false) => {
 					// was matching, but now disjoint
 					// log::debug!("\t\tPushing match {last_a}..{cur_a}");
-					matches.push(last_a..cur_a); // push matching range
+					diff.push(GeneDiff::Match(last_a..cur_a)); // push matching range
 					was_matching = false; // start disjoint range
 					(last_a, last_b) = (cur_a, cur_b);
 					// pass to (_, false, false)
 				}
 				(true, false, true) => {
 					// was disjoint, but now matching
-					disjoint.push((last_a..cur_a, last_b..cur_b)); // push disjoint range
-											   // log::debug!("\t\tPushing disjoint ({last_a}..{cur_a}, {last_b}..{cur_b})");
+					diff.push(GeneDiff::Disjoint(last_a..cur_a, last_b..cur_b)); // push disjoint range
+															 // log::debug!("\t\tPushing disjoint ({last_a}..{cur_a}, {last_b}..{cur_b})");
 					was_matching = true; // start matching range
 					(last_a, last_b) = (cur_a, cur_b);
 					// pass to (_, true, true)
@@ -330,14 +334,28 @@ impl WasmGenome {
 				}
 			}
 		}
-		log::debug!("Found ranges for (0..{len_a}, 0..{len_b}): matching {matches:?} and disjoint {disjoint:?}");
-		(matches, disjoint)
+		log::debug!("Found diff ranges for (0..{len_a}, 0..{len_b}): {diff:?}");
+		diff
 	}
 }
 
+// TODO move or make configurable
+const DIST_COEFF_EXCESS: f64 = 0.3;
+const DIST_COEFF_DISJOINT: f64 = 0.5;
+
 impl Genome for WasmGenome {
 	fn dist(&self, other: &Self) -> f64 {
-		todo!() // use markers
+		let diff = self.diff(other);
+		let n = cmp::max(self.len(), other.len()) as f64; // max num genes
+		let (num_excess, num_disjoint) =
+			diff.into_iter()
+				.fold((0, 0), |(acc_e, acc_d), gd| match gd {
+					GeneDiff::Match(_) => (acc_e, acc_d),
+					GeneDiff::Disjoint(a, b) if a.is_empty() => (acc_e + b.len(), acc_d),
+					GeneDiff::Disjoint(a, b) if b.is_empty() => (acc_e + a.len(), acc_d),
+					GeneDiff::Disjoint(a, b) => (acc_e, acc_d + b.len()),
+				});
+		(DIST_COEFF_EXCESS * (num_excess as f64) + DIST_COEFF_DISJOINT * (num_disjoint as f64)) / n
 	}
 
 	fn fitness(&self) -> f64 {

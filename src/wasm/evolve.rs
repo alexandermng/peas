@@ -21,12 +21,13 @@ use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterato
 use wasm_encoder::{Instruction, ValType};
 use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
 
-use crate::genetic::{
-	self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Problem, Selector, Solution,
-};
 use crate::wasm::{
 	genome::{InnovNum, StackValType, WasmGene, WasmGenome},
 	mutations::NeutralAddOp,
+};
+use crate::{
+	genetic::{self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Problem, Selector, Solution},
+	wasm::GeneDiff,
 };
 
 use super::mutations::MutationLog;
@@ -206,18 +207,16 @@ where
 			ctx.avg_fitness = pop.iter().map(WasmGenome::fitness).sum::<f64>() / (pop.len() as f64);
 
 			// Logging
-			log::info!("Average Fitness: {}", ctx.avg_fitness);
-			log::info!("Top 10:");
-			for p in self.pop.iter().take(10) {
-				log::info!("\t{} <-- {}", p.fitness, p);
+			{
+				log::info!("Average Fitness: {}", ctx.avg_fitness);
+				log::info!("Top 10:");
+				for p in self.pop.iter().take(10) {
+					log::info!("\t{} <-- {}", p.fitness, p);
+				}
+				let filename = format!("trial_{}.log/gen_{}.wasm", self.seed, ctx.generation);
+				let topguy = pop[0].emit();
+				fs::write(filename, topguy);
 			}
-			let filename = format!("trial_{}.log/gen_{}.wasm", self.seed, ctx.generation);
-			// pop[0] // best
-			// 	.module
-			// 	.borrow_mut()
-			// 	.emit_wasm_file(filename) // still dont know why this is mut tbh
-			// 	.unwrap();
-			// TODO logging hook
 
 			// Test stop condition
 			if self.stop_cond.test(&mut ctx, pop) {
@@ -358,29 +357,24 @@ where
 
 	fn crossover(&self, par_a: &Self::G, par_b: &Self::G) -> Self::G {
 		log::debug!("Crossing over:\n\ta = {par_a:?}\n\tb = {par_b:?}");
-		let (matches, disjoint) = par_a.intersect(par_b);
+		let diff = par_a.diff(par_b);
 
 		let mut ctx = self.ctx.borrow_mut();
 		let mut child: Vec<WasmGene> = Vec::with_capacity(par_a.len());
-		// will be [mat, dis, mat, dis,... mat?]
-		for (mat, (dis_a, dis_b)) in
-			Iterator::zip(matches.iter().cloned(), disjoint.iter().cloned())
-		{
-			child.extend(par_a[mat].iter().cloned()); // get matching
-										  // then disjoint
-			let genes_a = &par_a[dis_a];
-			let genes_b = &par_b[dis_b];
-			let choice = if ctx.rng.gen_bool(0.5) {
-				genes_a
-			} else {
-				genes_b
-			};
-			// let choice = *[&par_a[dis_a], &par_b[dis_b]].choose(&mut ctx.rng).unwrap(); // choose one or the other
-			child.extend(choice.iter().cloned());
-		}
-		if matches.len() > disjoint.len() {
-			let last = matches.last().unwrap().clone();
-			child.extend(par_a[last].iter().cloned());
+		for d in diff {
+			match d {
+				GeneDiff::Match(mat) => {
+					child.extend(par_a[mat].iter().cloned());
+				}
+				GeneDiff::Disjoint(a, b) => {
+					let choice = if ctx.rng.gen_bool(0.5) {
+						&par_a[a]
+					} else {
+						&par_b[b]
+					};
+					child.extend(choice.iter().cloned());
+				}
+			}
 		}
 
 		WasmGenome {
