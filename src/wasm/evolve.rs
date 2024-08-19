@@ -313,7 +313,7 @@ where
 
 		// Add to next generation!
 		self.pop.append(&mut nextgen);
-		assert!(self.pop.len() == self.pop_size, "should be fully populated");
+		debug_assert!(self.pop.len() == self.pop_size, "should be fully populated");
 
 		let mut ctx = self.ctx.borrow_mut();
 		log::info!(
@@ -507,6 +507,7 @@ where
 	pub fn build(self) -> WasmGenAlg<P, M, S> {
 		let size = self.pop_size.unwrap();
 		let seed = self.seed.unwrap();
+		// TODO assert crossover_rate + elitism_rate <= 1.0
 		WasmGenAlg {
 			problem: self.problem.unwrap(),
 			pop_size: size,

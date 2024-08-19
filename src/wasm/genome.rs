@@ -5,6 +5,7 @@ use std::{
 	cell::{Ref, RefCell},
 	cmp,
 	fmt::{Debug, Display},
+	fs,
 	ops::{Deref, DerefMut, Range, RangeBounds},
 };
 
@@ -259,10 +260,12 @@ impl WasmGenome {
 			.section(&expos)
 			.section(&codes);
 		let out = modu.finish();
-		debug_assert!(
-			wasmparser::validate(&out).is_ok(),
-			"generated invalid module"
-		);
+		#[cfg(debug_assertions)]
+		if let Err(e) = wasmparser::validate(&out) {
+			log::error!("Outputting to ./invalid.wasm");
+			fs::write("invalid.wasm", &out).unwrap();
+			panic!("{e:?}");
+		}
 		out
 	}
 

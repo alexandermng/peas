@@ -82,16 +82,16 @@ fn main() {
 	};
 	let mut ga = WasmGenAlgBuilder::default()
 		.problem(prob)
-		.pop_size(100)
-		.generations(30)
+		.pop_size(250)
+		.generations(100)
 		.stop_condition(Box::new(|ctx: &mut Context, _: &[WasmGenome]| -> bool {
 			ctx.max_fitness >= 1.0
 		}))
-		.selection(TournamentSelection::new(0.8, 3, 0.9, false)) // can do real tournament selection when selection is fixed
+		.selection(TournamentSelection::new(0.8, 2, 0.9, true)) // can do real tournament selection when selection is fixed
 		.enable_elitism(true)
-		.elitism_rate(0.05)
+		.elitism_rate(0.02)
 		.enable_crossover(true)
-		.crossover_rate(0.8)
+		.crossover_rate(0.95)
 		// .crossover()
 		.mutation_rate(1.0)
 		.mutation(SequenceMutator::from(&muts[..]))
