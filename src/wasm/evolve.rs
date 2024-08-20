@@ -246,12 +246,12 @@ where
 		let mut nextgen: Vec<Self::G> = Vec::with_capacity(self.pop_size);
 
 		let elitism_cnt = (self.elitism_rate * (self.pop_size as f64)) as usize;
-		if self.enable_elitism {
+		let elites = if self.enable_elitism {
 			log::info!("Passing {elitism_cnt} elites to next generation.");
-			for i in 0..elitism_cnt {
-				nextgen.push(self.pop[i].clone());
-			}
-		}
+			self.pop[0..elitism_cnt].to_vec()
+		} else {
+			Vec::new()
+		};
 
 		//TODO speciation
 		if self.enable_speciation {
@@ -292,10 +292,7 @@ where
 		}
 
 		// Mutation
-		if self.enable_elitism {
-			self.pop = nextgen[0..elitism_cnt].to_vec(); // clone elites
-		}
-		let needed = self.pop_size - self.pop.len() - nextgen.len(); // amount needed
+		let needed = self.pop_size - elites.len() - nextgen.len(); // amount needed
 		log::info!(
 			"Mutating {} unique genomes (+{needed} copy-variants).",
 			nextgen.len()
@@ -305,14 +302,14 @@ where
 			.cloned()
 			.collect(); // fill to capacity
 		nextgen.extend(fill);
-		nextgen = nextgen
+		self.pop = nextgen
 			// .into_par_iter() // OPT
 			.into_iter()
 			.map(|g| self.mutate(g))
-			.collect(); // OPT- collect into pop directly? rust stupid
+			.collect();
 
 		// Add to next generation!
-		self.pop.append(&mut nextgen);
+		self.pop.extend(elites);
 		debug_assert!(self.pop.len() == self.pop_size, "should be fully populated");
 
 		let mut ctx = self.ctx.borrow_mut();
