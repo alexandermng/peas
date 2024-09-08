@@ -6,7 +6,7 @@ use peas::{
 	genetic::{Mutator, OnceMutator, Problem, Solution},
 	selection::TournamentSelection,
 	wasm::{
-		mutations::{MutationLog, NeutralAddOp, SequenceMutator, SwapRoot},
+		mutations::{AddOperation, ChangeRoot, MutationLog, SequenceMutator},
 		Context, WasmGenAlgBuilder, WasmGene, WasmGenome,
 	},
 };
@@ -120,8 +120,8 @@ fn main() {
 	let seed: u64 = thread_rng().gen();
 	let muts: [&dyn Mutator<_, _>; 2] = [
 		// for use in sequence
-		&NeutralAddOp::from_rate(0.2), // local variable
-		&SwapRoot::from_rate(0.3),     // consts, locals, push onto stack
+		&AddOperation::from_rate(0.2), // local variable
+		&ChangeRoot::from_rate(0.3),   // consts, locals, push onto stack
 
 		                               // NeutralAddLocal::with_rate(0.01),
 		                               // SwapOp::with_rate(0.02),

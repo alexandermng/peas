@@ -45,8 +45,8 @@ impl<M: WasmMutator> Mutator<WasmGenome, Context> for M {
 #[derive(Debug)]
 pub enum MutationLog {
 	AddOp(InnovNum, Instruction<'static>), // AddOp added after gene @ InnovNum, with Op instruction
-	SwapRoot(InnovNum, Instruction<'static>), // SwapRoot swapping from gene @ InnovNum, with new instruction
-	Unique(&'static str),                     // unique mutations
+	ChangeRoot(InnovNum, Instruction<'static>), // ChangeRoot from gene @ InnovNum, with new instruction
+	Unique(&'static str),                  // unique mutations
 }
 
 impl Hash for MutationLog {
@@ -54,7 +54,7 @@ impl Hash for MutationLog {
 		mem::discriminant(self).hash(state);
 		let (num, instr) = match self {
 			MutationLog::AddOp(n, i) => (n, i),
-			MutationLog::SwapRoot(n, i) => (n, i),
+			MutationLog::ChangeRoot(n, i) => (n, i),
 			MutationLog::Unique(s) => {
 				s.hash(state);
 				return;
@@ -79,10 +79,10 @@ impl PartialEq for MutationLog {
 			) => lnum == rnum && lu == ru,
 			(Self::AddOp(lnum, _), Self::AddOp(rnum, _)) => lnum == rnum,
 			(
-				Self::SwapRoot(lnum, Instruction::LocalGet(lu)),
-				Self::SwapRoot(rnum, Instruction::LocalGet(ru)),
+				Self::ChangeRoot(lnum, Instruction::LocalGet(lu)),
+				Self::ChangeRoot(rnum, Instruction::LocalGet(ru)),
 			) => lnum == rnum && lu == ru,
-			(Self::SwapRoot(lnum, _), Self::AddOp(rnum, _)) => lnum == rnum,
+			(Self::ChangeRoot(lnum, _), Self::AddOp(rnum, _)) => lnum == rnum,
 			(Self::Unique(ls), Self::Unique(rs)) => ls == rs,
 			_ => false,
 		}
@@ -90,16 +90,16 @@ impl PartialEq for MutationLog {
 }
 impl Eq for MutationLog {}
 
-/// Adds an Operation after a random gene.
-pub struct NeutralAddOp {
+/// Adds an Operation after a random gene. Neutral.
+pub struct AddOperation {
 	rate: f64,
 }
-impl NeutralAddOp {
+impl AddOperation {
 	pub fn from_rate(rate: f64) -> Self {
 		Self { rate }
 	}
 }
-impl WasmMutator for NeutralAddOp {
+impl WasmMutator for AddOperation {
 	fn find_valids(&self, indiv: &WasmGenome) -> Vec<usize> {
 		let len = indiv.len();
 		log::debug!("NeutralAddOp found ({len} valid / {len} total) genes");
@@ -152,15 +152,15 @@ impl WasmMutator for NeutralAddOp {
 	}
 }
 
-pub struct SwapRoot {
+pub struct ChangeRoot {
 	rate: f64,
 }
-impl SwapRoot {
+impl ChangeRoot {
 	pub fn from_rate(rate: f64) -> Self {
 		Self { rate }
 	}
 }
-impl WasmMutator for SwapRoot {
+impl WasmMutator for ChangeRoot {
 	fn find_valids(&self, indiv: &WasmGenome) -> Vec<usize> {
 		let out: Vec<usize> = indiv
 			.genes
@@ -218,7 +218,7 @@ impl WasmMutator for SwapRoot {
 			}
 			_ => unimplemented!("unexpected stack value type"),
 		};
-		let mlog = MutationLog::SwapRoot(indiv[loc].marker, root.clone());
+		let mlog = MutationLog::ChangeRoot(indiv[loc].marker, root.clone());
 		log::debug!("Mutated {mlog:?}");
 		let root = WasmGene {
 			instr: root,

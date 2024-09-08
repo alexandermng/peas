@@ -23,7 +23,7 @@ use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults,
 
 use crate::wasm::{
 	genome::{InnovNum, StackValType, WasmGene, WasmGenome},
-	mutations::NeutralAddOp,
+	mutations::AddOperation,
 };
 use crate::{
 	genetic::{self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Problem, Selector, Solution},
