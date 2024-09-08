@@ -35,6 +35,28 @@ pub trait GenAlg {
 	fn crossover(&self, a: &Self::G, b: &Self::G) -> Self::G;
 }
 
+/// A species in a genetic algorithm
+pub trait Species<G, C>
+where
+	G: Genome,
+	C: AsContext,
+{
+	// fn epoch() ???
+
+	fn select(&mut self, num: usize) -> Vec<&G>;
+
+	fn crossover(&mut self, num: usize, parents: Vec<&G>) -> Vec<G>; // TODO consider... will all selected reproduce?
+
+	fn add_genome(&mut self, g: G);
+
+	/// Adjust individual fitnesses based on average fitness of species
+	fn adjust_fitness(&mut self);
+
+	fn fitness(&self) -> f64;
+	fn representative(&self) -> &G;
+	fn size(&self) -> usize;
+}
+
 /// The Genome of an individual in a Genetic Algorithm.
 pub trait Genome {
 	/// The distance between two Genomes, used to measure compatibility for crossover.
@@ -42,7 +64,43 @@ pub trait Genome {
 
 	/// The fitness of this Genome after evaluated.
 	fn fitness(&self) -> f64;
+
+	/// Crossover with another parent into a new offspring.
+	fn reproduce(&self, other: &Self, ctx: impl AsContext) -> Self;
+
+	/// Crossover with another parent into a new offspring, consuming this parent.
+	fn reproduce_into(self, other: &Self, ctx: impl AsContext) -> Self
+	where
+		Self: Sized,
+	{
+		self.reproduce(other, ctx)
+	}
 }
+
+/// Genetic Algorithm Context
+pub trait AsContext {
+	/// Get the RNG
+	fn rng(&mut self) -> &mut impl Rng;
+
+	/// Current generation number
+	fn generation(&self) -> usize;
+
+	// TODO: params?
+}
+
+// TODO add conversion
+// impl<T> AsContext for T
+// where
+// 	T: AsMut<AsContext>,
+// {
+// 	fn rng(&mut self) -> &mut impl Rng {
+// 		self.as_mut().rng()
+// 	}
+
+// 	fn generation(&mut self) -> usize {
+// 		self
+// 	}
+// }
 
 /// Represents a task or problem to be solved by a genetic algorithm's individual/agent. Should contain
 /// problem parameters and necessary training data for evaluation.

@@ -10,12 +10,13 @@ use std::{
 };
 
 use eyre::{eyre, Result};
+use rand::Rng;
 use wasm_encoder::{
 	CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction, Module,
 	PrimitiveValType, TypeSection, ValType,
 };
 
-use crate::genetic::Genome;
+use crate::genetic::{AsContext, Genome};
 
 /// A global unique id within a Genetic Algorithm
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
@@ -363,6 +364,38 @@ impl Genome for WasmGenome {
 
 	fn fitness(&self) -> f64 {
 		self.fitness
+	}
+
+	fn reproduce(&self, other: &Self, mut ctx: impl AsContext) -> Self {
+		let par_a = self;
+		let par_b = other;
+		log::debug!("Crossing over:\n\ta = {par_a:?}\n\tb = {par_b:?}");
+		let diff = par_a.diff(par_b);
+
+		let mut child: Vec<WasmGene> = Vec::with_capacity(par_a.len());
+		for d in diff {
+			match d {
+				GeneDiff::Match(mat) => {
+					child.extend(par_a[mat].iter().cloned());
+				}
+				GeneDiff::Disjoint(a, b) => {
+					let choice = if ctx.rng().gen_bool(0.5) {
+						&par_a[a]
+					} else {
+						&par_b[b]
+					};
+					child.extend(choice.iter().cloned());
+				}
+			}
+		}
+
+		WasmGenome {
+			genes: child,
+			fitness: 0.0,
+			params: par_a.params.clone(),
+			result: par_a.result.clone(),
+			locals: par_a.locals.clone(),
+		}
 	}
 }
 

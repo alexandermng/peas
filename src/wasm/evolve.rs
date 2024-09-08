@@ -21,9 +21,12 @@ use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterato
 use wasm_encoder::{Instruction, ValType};
 use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
 
-use crate::wasm::{
-	genome::{InnovNum, StackValType, WasmGene, WasmGenome},
-	mutations::AddOperation,
+use crate::{
+	genetic::AsContext,
+	wasm::{
+		genome::{InnovNum, StackValType, WasmGene, WasmGenome},
+		mutations::AddOperation,
+	},
 };
 use crate::{
 	genetic::{self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Problem, Selector, Solution},
@@ -118,6 +121,16 @@ impl Context {
 
 	pub fn num_innovs(&self) -> InnovNum {
 		self.innov_cnt
+	}
+}
+
+impl AsContext for Context {
+	fn rng(&mut self) -> &mut impl Rng {
+		&mut self.rng
+	}
+
+	fn generation(&mut self) -> usize {
+		self.generation
 	}
 }
 
@@ -353,122 +366,8 @@ where
 	}
 
 	fn crossover(&self, par_a: &Self::G, par_b: &Self::G) -> Self::G {
-		log::debug!("Crossing over:\n\ta = {par_a:?}\n\tb = {par_b:?}");
-		let diff = par_a.diff(par_b);
-
-		let mut ctx = self.ctx.borrow_mut();
-		let mut child: Vec<WasmGene> = Vec::with_capacity(par_a.len());
-		for d in diff {
-			match d {
-				GeneDiff::Match(mat) => {
-					child.extend(par_a[mat].iter().cloned());
-				}
-				GeneDiff::Disjoint(a, b) => {
-					let choice = if ctx.rng.gen_bool(0.5) {
-						&par_a[a]
-					} else {
-						&par_b[b]
-					};
-					child.extend(choice.iter().cloned());
-				}
-			}
-		}
-
-		WasmGenome {
-			genes: child,
-			fitness: 0.0,
-			params: par_a.params.clone(),
-			result: par_a.result.clone(),
-			locals: par_a.locals.clone(),
-		}
-		/*
-		first, extract the "genes" part of each wasm genome
-		Then, starting at the first gene, repeat this algorithm:
-		If the corresponding genes match, clone into the child
-		If they do not match, check which one has the lower innovation number
-		Iterate through the other genome until a matching gene is found
-		If a matching gene is not found, repeat this step with the next lowest innovation number gene until a match is found
-		Once a match is found, the captured genes are chosen based on which parent has the higher fitness (currently random) or randomly if fitness is equal
-		*/
-		// let len_a = par_a.len();
-		// let len_b = par_b.len();
-		// let mut child: Vec<WasmGene> = Vec::new();
-
-		// let mut idx_a = 0; // cur idx in a
-		// let mut last_a = 0; // idx of last match in a
-		// let mut idx_b = 0; // cur idx in b
-		// let mut last_b = 0; // idx of last match in b
-
-		// while idx_a < len_a && idx_b < len_b {
-		// 	if par_a[idx_a] == par_b[idx_b] {
-		// 		// add match to child
-		// 		child.push(par_a[idx_a]);
-		// 		last_a = idx_a;
-		// 		last_b = idx_b;
-		// 		idx_a += 1;
-		// 		idx_b += 1;
-		// 	} else {
-		// 		let mut found = false;
-		// 		let mut temp_A = idx_a;
-		// 		let mut temp_B = idx_b;
-
-		// 		if par_a[idx_a].marker > par_b[idx_b].marker {
-		// 			while idx_a < len_a && !found {
-		// 				if WasmGene::eq(&par_a[idx_a], &par_b[idx_b]) {
-		// 					found = true;
-		// 				} else {
-		// 					idx_a += 1;
-		// 				}
-		// 			}
-		// 		} else {
-		// 			while idx_b < len_b && !found {
-		// 				if WasmGene::eq(&par_a[idx_a], &par_b[idx_b]) {
-		// 					found = true;
-		// 				} else {
-		// 					idx_b += 1;
-		// 				}
-		// 			}
-		// 		}
-
-		// 		if !found {
-		// 			idx_a = temp_A;
-		// 			idx_b = temp_B;
-		// 			if par_a[idx_a].marker > par_b[idx_b].marker {
-		// 				idx_b += 1;
-		// 			} else {
-		// 				idx_a += 1;
-		// 			}
-		// 			if !WasmGene::eq(&par_a[idx_a], &par_b[idx_b]) {
-		// 				continue;
-		// 			}
-		// 		}
-
-		// 		//success
-		// 		let mut rng = rand::thread_rng();
-		// 		if rng.gen_bool(0.5) {
-		// 			child.extend(par_a[last_a + 1..idx_a].iter().cloned());
-		// 		} else {
-		// 			child.extend(par_b[last_b + 1..idx_b].iter().cloned());
-		// 		}
-		// 		continue;
-		// 	}
-		// }
-
-		// if idx_a < len_a {
-		// 	child.extend(par_a[last_a + 1..len_a].iter().cloned());
-		// } else if idx_b < len_b {
-		// 	child.extend(par_b[last_b + 1..len_b].iter().cloned());
-		// }
-
-		// //can probably be replaced with "new" function after further work on that
-		// WasmGenome {
-		// 	genes: child,
-		// 	fitness: 0.0,
-		// 	params: todo!(),
-		// 	result: todo!(),
-
-		// 	locals: todo!(),
-		// }
+		let ctx = self.ctx.borrow_mut();
+		par_a.reproduce(par_b, ctx)
 	}
 }
 
