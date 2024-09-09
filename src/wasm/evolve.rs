@@ -125,11 +125,13 @@ impl Context {
 }
 
 impl AsContext for Context {
+	#[inline]
 	fn rng(&mut self) -> &mut impl Rng {
 		&mut self.rng
 	}
 
-	fn generation(&mut self) -> usize {
+	#[inline]
+	fn generation(&self) -> usize {
 		self.generation
 	}
 }
@@ -203,6 +205,7 @@ where
 	P::Out: WasmResults,
 {
 	type G = WasmGenome;
+	type C = Context;
 
 	fn epoch(&mut self) -> bool {
 		log::info!("Evaluating generation {}.", self.ctx.borrow().generation);
@@ -366,8 +369,8 @@ where
 	}
 
 	fn crossover(&self, par_a: &Self::G, par_b: &Self::G) -> Self::G {
-		let ctx = self.ctx.borrow_mut();
-		par_a.reproduce(par_b, ctx)
+		let mut ctx = self.ctx.borrow_mut();
+		par_a.reproduce(par_b, &mut *ctx)
 	}
 }
 

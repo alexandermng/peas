@@ -11,7 +11,8 @@ use rand::Rng;
 /// Represents a genetic algorithm, which must implement these genetic operators, for a given Genome type.
 /// It holds parameters for these operators and keeps track of its current population through generations.
 pub trait GenAlg {
-	type G: Genome;
+	type G: Genome<Self::C>;
+	type C: AsContext;
 
 	/// Executes an epoch/generation by performing:
 	/// 1. Evaluation/Simulation, calculating fitnesses
@@ -38,7 +39,7 @@ pub trait GenAlg {
 /// A species in a genetic algorithm
 pub trait Species<G, C>
 where
-	G: Genome,
+	G: Genome<C>,
 	C: AsContext,
 {
 	// fn epoch() ???
@@ -58,7 +59,10 @@ where
 }
 
 /// The Genome of an individual in a Genetic Algorithm.
-pub trait Genome {
+pub trait Genome<C>
+where
+	C: AsContext,
+{
 	/// The distance between two Genomes, used to measure compatibility for crossover.
 	fn dist(&self, other: &Self) -> f64;
 
@@ -66,10 +70,10 @@ pub trait Genome {
 	fn fitness(&self) -> f64;
 
 	/// Crossover with another parent into a new offspring.
-	fn reproduce(&self, other: &Self, ctx: impl AsContext) -> Self;
+	fn reproduce(&self, other: &Self, ctx: &mut C) -> Self;
 
 	/// Crossover with another parent into a new offspring, consuming this parent.
-	fn reproduce_into(self, other: &Self, ctx: impl AsContext) -> Self
+	fn reproduce_into(self, other: &Self, ctx: &mut C) -> Self
 	where
 		Self: Sized,
 	{
@@ -123,39 +127,60 @@ pub trait Solution<P: Problem>: Sync {
 
 /// The selection operator in a Genetic Algorithm. To be called once per generation, with optional
 /// parameter variation after evaluation each generation.
-pub trait Selector<G: Genome, C> {
+pub trait Selector<G, C>
+where
+	G: Genome<C>,
+	C: AsContext,
+{
 	fn select(&self, ctx: &mut C, pop: Vec<G>) -> Vec<G>;
 	fn vary_params(&mut self, ctx: &mut C, pop: &[G]) {}
 }
 
 /// The mutation operator in a Genetic Algorithm. Called per-individual, with optional parameter
 /// variation after evaluation each generation.
-pub trait Mutator<G: Genome, C> {
+pub trait Mutator<G, C>
+where
+	G: Genome<C>,
+	C: AsContext,
+{
 	fn mutate(&self, ctx: &mut C, indiv: G) -> G;
 	fn vary_params(&mut self, ctx: &mut C, pop: &[G]) {}
 }
 
-/// The crossover operator in a Genetic Algorithm. Called per-pair, with optional parameter variation
-/// after evaluation each generation.
-pub trait Recombiner<G: Genome, C> {
-	fn crossover(&self, ctx: &mut C, par_a: G, par_b: &G) -> G;
-	fn vary_params(&mut self, ctx: &mut C, pop: &[G]) {}
-}
+// /// The crossover operator in a Genetic Algorithm. Called per-pair, with optional parameter variation
+// /// after evaluation each generation.
+// pub trait Recombiner<G, C>
+// where
+// 	G: Genome<C>,
+// 	C: AsContext,
+// {
+// 	fn crossover(&self, ctx: &mut C, par_a: G, par_b: &G) -> G;
+// 	fn vary_params(&mut self, ctx: &mut C, pop: &[G]) {}
+// }
 
 /// View and determine something about a Genetic Algorithm. Used for stop conditions.
-pub trait Predicate<G: Genome, C> {
+pub trait Predicate<G, C>
+where
+	G: Genome<C>,
+	C: AsContext,
+{
 	fn test(&mut self, ctx: &mut C, pop: &[G]) -> bool;
 }
 
 /// View the Genetic Algorithm in-progress. Used for logging.
-pub trait Peeker<G: Genome, C> {
+pub trait Peeker<G, C>
+where
+	G: Genome<C>,
+	C: AsContext,
+{
 	fn peek(&mut self, ctx: &mut C, pop: &[G]);
 }
 
 /// Mutator meant to be called only once (noop after). Used for gene initialization.
 pub struct OnceMutator<G, C, T = Box<dyn FnMut(&mut C, G) -> G>>
 where
-	G: Genome,
+	G: Genome<C>,
+	C: AsContext,
 	T: FnMut(&mut C, G) -> G,
 {
 	inner: RefCell<T>,
@@ -164,7 +189,8 @@ where
 
 impl<T, G, C> OnceMutator<G, C, T>
 where
-	G: Genome,
+	G: Genome<C>,
+	C: AsContext,
 	T: FnMut(&mut C, G) -> G,
 {
 	pub fn new(mutator: T) -> Self {
@@ -177,7 +203,8 @@ where
 
 impl<T, G, C> Mutator<G, C> for OnceMutator<G, C, T>
 where
-	G: Genome,
+	G: Genome<C>,
+	C: AsContext,
 	T: FnMut(&mut C, G) -> G,
 {
 	/// Runs closure on first mutation, and is a no-op on subsequent calls.
@@ -189,7 +216,8 @@ where
 
 impl<T, G, C> From<T> for OnceMutator<G, C>
 where
-	G: Genome,
+	G: Genome<C>,
+	C: AsContext,
 	T: FnMut(&mut C, G) -> G + 'static,
 {
 	fn from(value: T) -> Self {
@@ -234,7 +262,8 @@ where
 
 impl<T, C, G> Predicate<G, C> for T
 where
-	G: Genome,
+	G: Genome<C>,
+	C: AsContext,
 	T: FnMut(&mut C, &[G]) -> bool,
 {
 	fn test(&mut self, ctx: &mut C, pop: &[G]) -> bool {
@@ -244,7 +273,8 @@ where
 
 impl<T, C, G> Peeker<G, C> for T
 where
-	G: Genome,
+	G: Genome<C>,
+	C: AsContext,
 	T: FnMut(&mut C, &[G]),
 {
 	fn peek(&mut self, ctx: &mut C, pop: &[G]) {

@@ -8,7 +8,7 @@ use rand::{
 };
 
 use crate::{
-	genetic::{Genome, Selector},
+	genetic::{AsContext, Genome, Selector},
 	wasm::Context,
 };
 
@@ -40,11 +40,12 @@ impl TournamentSelection {
 	}
 }
 
-impl<G> Selector<G, Context> for TournamentSelection
+impl<G, C> Selector<G, C> for TournamentSelection
 where
-	G: Genome + Clone,
+	G: Genome<C> + Clone,
+	C: AsContext,
 {
-	fn select(&self, ctx: &mut Context, mut pop: Vec<G>) -> Vec<G> {
+	fn select(&self, ctx: &mut C, mut pop: Vec<G>) -> Vec<G> {
 		let mut out = vec![];
 		let bern = Bernoulli::new(self.p).unwrap();
 		let selection_cnt = (self.rate * (pop.len() as f64)) as usize;
@@ -52,10 +53,10 @@ where
 			let mut tourney: Vec<_> = pop
 				.iter() // length k (or however many left)
 				.enumerate()
-				.choose_multiple(&mut ctx.rng, self.k);
+				.choose_multiple(ctx.rng(), self.k);
 			tourney.sort_unstable_by(|(_, a), (_, b)| f64::total_cmp(&b.fitness(), &a.fitness()));
 			let winner = (0..tourney.len())
-				.find(|_| bern.sample(&mut ctx.rng)) // first with chance p, second with p*(1-p), ...
+				.find(|_| bern.sample(ctx.rng())) // first with chance p, second with p*(1-p), ...
 				.unwrap_or(tourney.len() - 1);
 			let winner = tourney[winner].0; // actual index
 			let winner = if self.replacement {

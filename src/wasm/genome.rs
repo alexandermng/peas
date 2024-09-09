@@ -18,6 +18,8 @@ use wasm_encoder::{
 
 use crate::genetic::{AsContext, Genome};
 
+use super::Context;
+
 /// A global unique id within a Genetic Algorithm
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct InnovNum(pub usize);
@@ -347,7 +349,7 @@ impl WasmGenome {
 const DIST_COEFF_EXCESS: f64 = 0.3;
 const DIST_COEFF_DISJOINT: f64 = 0.5;
 
-impl Genome for WasmGenome {
+impl Genome<Context> for WasmGenome {
 	fn dist(&self, other: &Self) -> f64 {
 		let diff = self.diff(other);
 		let n = cmp::max(self.len(), other.len()) as f64; // max num genes
@@ -366,7 +368,7 @@ impl Genome for WasmGenome {
 		self.fitness
 	}
 
-	fn reproduce(&self, other: &Self, mut ctx: impl AsContext) -> Self {
+	fn reproduce(&self, other: &Self, mut ctx: &mut Context) -> Self {
 		let par_a = self;
 		let par_b = other;
 		log::debug!("Crossing over:\n\ta = {par_a:?}\n\tb = {par_b:?}");
