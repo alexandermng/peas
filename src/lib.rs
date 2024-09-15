@@ -1,6 +1,7 @@
 #![allow(unused)] // for now
 
 pub mod genetic;
+pub mod params;
 pub mod selection;
 pub mod wasm {
 	mod evolve;
