@@ -224,6 +224,10 @@ where
 			pop: Vec::with_capacity(size),
 		}
 	}
+
+	fn epoch_speciation() {
+		todo!();
+	}
 }
 
 impl<P, M, S> GenAlg for WasmGenAlg<P, M, S>
@@ -301,7 +305,7 @@ where
 
 		//TODO speciation
 		if self.params.enable_speciation {
-			todo!();
+			WasmGenAlg::<P, M, S>::epoch_speciation();
 		}
 
 		// TODO extract selection
