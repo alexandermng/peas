@@ -149,7 +149,7 @@ where
 	problem: P,
 	mutator: M,
 	selector: S,
-	init_genome: OnceMutator<WasmGenome, Context>,
+	init_genome: WasmGenome,
 	stop_cond: Box<dyn Predicate<WasmGenome, Context>>,
 	params: GenAlgParams,
 	seed: u64,
@@ -185,13 +185,8 @@ where
 	}
 
 	fn init(&mut self) {
-		let params = &[StackValType::I32, StackValType::I32, StackValType::I32]; // TODO: fix hardcode
-		let result = &[StackValType::I32];
-		for i in 0..self.params.pop_size {
-			let mut wg = WasmGenome::new(params, result);
-			wg = self.init_genome.mutate(self.ctx.get_mut(), wg);
-			self.pop.push(wg);
-		}
+		self.pop
+			.extend((0..self.params.pop_size).map(|_| self.init_genome.clone()));
 	}
 
 	fn new(
@@ -199,7 +194,7 @@ where
 		problem: P,
 		mutator: M,
 		selector: S,
-		init_genome: OnceMutator<WasmGenome, Context>,
+		init_genome: WasmGenome,
 		stop_cond: Box<dyn Predicate<WasmGenome, Context>>,
 	) -> Self {
 		let seed = params.seed.unwrap_or_else(|| thread_rng().gen());
@@ -425,7 +420,7 @@ where
 	// crossover: Option<C>
 	mutation_rate: Option<f64>,
 	mutation: Option<M>,
-	starter: Option<OnceMutator<WasmGenome, Context>>,
+	starter: Option<WasmGenome>,
 	stop_cond: Option<Box<dyn Predicate<WasmGenome, Context>>>,
 	generations: Option<usize>,
 	seed: Option<u64>,
@@ -518,7 +513,7 @@ where
 		self
 	}
 
-	pub fn init_genome(mut self, init: OnceMutator<WasmGenome, Context>) -> Self {
+	pub fn init_genome(mut self, init: WasmGenome) -> Self {
 		self.starter = Some(init);
 		self
 	}
