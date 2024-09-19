@@ -8,7 +8,7 @@ pub mod wasm {
 	pub mod genome;
 	pub mod graph;
 	pub mod mutations;
-	// pub mod ir;
+	pub mod species;
 
 	pub use evolve::*;
 	pub use genome::*;
