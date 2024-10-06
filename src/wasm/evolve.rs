@@ -25,7 +25,8 @@ use crate::{
 	genetic::AsContext,
 	params::GenAlgParams,
 	wasm::{
-		genome::{InnovNum, StackValType, WasmGene, WasmGenome},
+		genome::{InnovNum, WasmGene, WasmGenome},
+		ir::ValType as StackValType,
 		mutations::AddOperation,
 	},
 };

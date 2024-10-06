@@ -4,21 +4,27 @@ use std::{
 	borrow::Cow,
 	cell::{Ref, RefCell},
 	cmp,
+	collections::HashSet,
 	fmt::{Debug, Display},
 	fs,
 	ops::{Deref, DerefMut, Range, RangeBounds},
 };
 
 use eyre::{eyre, Result};
+use petgraph::visit::IntoNodeReferences;
 use rand::Rng;
 use wasm_encoder::{
-	CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction, Module,
+	CodeSection, Encode, ExportKind, ExportSection, Function, FunctionSection, Instruction, Module,
 	PrimitiveValType, TypeSection, ValType,
 };
 
-use crate::genetic::{AsContext, Genome};
+use crate::{
+	genetic::{AsContext, Genome},
+	wasm::ir::EncodeInContext,
+};
 
 use super::Context;
+use super::{graph::GeneGraph, ir::ValType as StackValType};
 
 /// A global unique id within a Genetic Algorithm
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
@@ -37,46 +43,6 @@ impl DerefMut for InnovNum {
 impl Display for InnovNum {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		Display::fmt(&self.0, f)
-	}
-}
-
-/// The type of a value on the stack
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum StackValType {
-	Bool,
-	U8, // unsigned integer
-	I8, // signed integer
-	U32,
-	I32,
-	U64,
-	I64,
-	F32, // float
-	F64,
-	// TODO mem/ref types
-}
-
-impl From<StackValType> for ValType {
-	fn from(value: StackValType) -> Self {
-		use StackValType::*;
-		match value {
-			Bool | U8 | I8 | U32 | I32 => ValType::I32,
-			U64 | I64 => ValType::I64,
-			F32 => ValType::F32,
-			F64 => ValType::F64,
-		}
-	}
-}
-
-//mapping isn't one-to-one so idk if this is fine
-impl From<ValType> for StackValType {
-	fn from(value: ValType) -> Self {
-		match value {
-			ValType::I32 => StackValType::I32,
-			ValType::I64 => StackValType::I64,
-			ValType::F32 => StackValType::I32,
-			ValType::F64 => StackValType::I64,
-			_ => todo!(),
-		}
 	}
 }
 
@@ -149,7 +115,7 @@ pub(crate) enum GeneDiff {
 /// phenotype is the solution for a particular problem.
 #[derive(Clone, Debug, Default)]
 pub struct WasmGenome {
-	pub genes: Vec<WasmGene<'static>>,
+	pub genes: GeneGraph,
 	pub fitness: f64,
 	pub params: Vec<StackValType>,
 	pub result: Vec<StackValType>,
@@ -164,7 +130,7 @@ impl WasmGenome {
 		let result = result.to_vec();
 		let locals = params.clone();
 		WasmGenome {
-			genes: Vec::new(),
+			genes: GeneGraph::new(),
 			fitness: 0.0,
 			params,
 			result,
@@ -172,59 +138,6 @@ impl WasmGenome {
 			locals,
 		}
 	}
-
-	pub fn from_binary(binary: &[u8]) -> Result<Self> {
-		// let mut module = walrus::Module::from_buffer(binary)
-		// 	.map_err(|e| eyre!("could not create module: {e}"))?;
-		// let func = module
-		// 	.exports
-		// 	.get_func("main")
-		// 	.map_err(|e| eyre!("cannot find main function: {e}"))?;
-		// Ok(WasmGenome {
-		// 	module: RefCell::new(module),
-		// 	func,
-		// 	markers: vec![],
-		// 	fitness: 0.0,
-		// })
-		todo!()
-	}
-
-	/// Insert genes into the genome after a specified index.
-	pub fn insert<I>(&mut self, idx: usize, genes: I)
-	where
-		I: IntoIterator<Item = WasmGene<'static>>,
-	{
-		let _: Vec<_> = self.genes.splice((idx + 1)..(idx + 1), genes).collect();
-	}
-
-	/// Replace genes in a range with the given genes. Returns removed genes.
-	pub fn replace<R, I>(&mut self, range: R, genes: I) -> Vec<WasmGene<'static>>
-	where
-		R: RangeBounds<usize>,
-		I: IntoIterator<Item = WasmGene<'static>>,
-	{
-		self.genes.splice(range, genes).collect()
-	}
-
-	// /// Retrieve the local position by global innovation number.
-	// pub fn get_instr(&self, inno: InnovNum) -> usize {
-	// 	self.markers
-	// 		.iter()
-	// 		.find_map(|&(pos, no)| (inno == no).then_some(pos))
-	// 		.unwrap()
-	// }
-
-	// pub fn get_inno(&self, pos: usize) -> InnovNum {
-	// 	self.markers
-	// 		.iter()
-	// 		.find_map(|&(po, no)| (pos == po).then_some(no))
-	// 		.unwrap()
-	// }
-
-	// /// Mark a new innovation (pushed to end)
-	// pub fn mark_at(&mut self, pos: usize, inno: InnovNum) {
-	// 	self.markers.push((pos, inno));
-	// }
 
 	pub fn emit(&self) -> Vec<u8> {
 		let mut modu = Module::new();
@@ -249,13 +162,22 @@ impl WasmGenome {
 		};
 		let codes = {
 			let mut cs = CodeSection::new();
-			let mut func = Function::new([]); // TODO add locals (map from self.locals)
-			for g in &self.genes {
+			let locals = self
+				.locals
+				.iter()
+				.enumerate()
+				.map(|(i, &v)| (i as u32, v.into()));
+			let mut func = Function::new(locals); // main
+			let mut sink = func.into_raw_body();
+			for node in self.genes.node_weights() {
+				node.encode(&self, &mut sink);
+				todo!();
 				// add instructions from genome
-				func.instruction(&g.instr);
+				// func.instruction(&g.instr);
 			}
-			func.instruction(&Instruction::End);
-			cs.function(&func);
+			Instruction::End.encode(&mut sink);
+			cs.raw(&sink);
+			// cs.function(&func);
 			cs
 		};
 		modu.section(&types)
@@ -276,6 +198,7 @@ impl WasmGenome {
 	/// where match ranges are of this genome's matching genes and disjoint ranges are a tuple of corresponding
 	/// (self, other) genes. Genes will be [mat, dis, mat, dis... mat?], starting with 0..0 if it starts disjoint.
 	pub(crate) fn diff(&self, other: &Self) -> Vec<GeneDiff> {
+		return todo!();
 		let len_a = self.len(); // par_a = self
 		let len_b = other.len(); // par_b = other
 		let mut diff = Vec::new();
@@ -351,17 +274,25 @@ const DIST_COEFF_DISJOINT: f64 = 0.5;
 
 impl Genome<Context> for WasmGenome {
 	fn dist(&self, other: &Self) -> f64 {
-		let diff = self.diff(other);
-		let n = cmp::max(self.len(), other.len()) as f64; // max num genes
-		let (num_excess, num_disjoint) =
-			diff.into_iter()
-				.fold((0, 0), |(acc_e, acc_d), gd| match gd {
-					GeneDiff::Match(_) => (acc_e, acc_d),
-					GeneDiff::Disjoint(a, b) if a.is_empty() => (acc_e + b.len(), acc_d),
-					GeneDiff::Disjoint(a, b) if b.is_empty() => (acc_e + a.len(), acc_d),
-					GeneDiff::Disjoint(a, b) => (acc_e, acc_d + b.len()),
+		// NOTE: just edges? what about nodes? gotta check in NEAT impl.
+		// OPT bitset? how to deal with highest common?
+		let ge_a: HashSet<InnovNum> = self.genes.edge_weights().map(|w| w.marker).collect();
+		let ge_b: HashSet<InnovNum> = other.genes.edge_weights().map(|w| w.marker).collect();
+		let highest_common = *ge_a.union(&ge_b).max().expect("graph non-empty");
+
+		let n = cmp::max(ge_a.len(), ge_b.len()) as f64;
+		let (disjoint_ge, excess_ge) =
+			ge_a.symmetric_difference(&ge_b)
+				.fold((0.0, 0.0), |acc, &i| {
+					if i > highest_common {
+						(acc.0, acc.1 + 1.0)
+					} else {
+						(acc.0 + 1.0, acc.1)
+					}
 				});
-		(DIST_COEFF_EXCESS * (num_excess as f64) + DIST_COEFF_DISJOINT * (num_disjoint as f64)) / n
+
+		// delta = c1*Excess/N + c2*Disjoint/N
+		DIST_COEFF_EXCESS * excess_ge / n + DIST_COEFF_DISJOINT * disjoint_ge / n
 	}
 
 	fn fitness(&self) -> f64 {
@@ -369,42 +300,25 @@ impl Genome<Context> for WasmGenome {
 	}
 
 	fn reproduce(&self, other: &Self, mut ctx: &mut Context) -> Self {
-		let par_a = self;
-		let par_b = other;
-		log::debug!("Crossing over:\n\ta = {par_a:?}\n\tb = {par_b:?}");
-		let diff = par_a.diff(par_b);
+		log::debug!("Crossing over:\n\ta = {self:?}\n\tb = {other:?}");
+		let par_a = self.genes;
+		let par_b = other.genes;
+		let gn_a: HashSet<InnovNum> = par_a.node_weights()
+		
 
-		let mut child: Vec<WasmGene> = Vec::with_capacity(par_a.len());
-		for d in diff {
-			match d {
-				GeneDiff::Match(mat) => {
-					child.extend(par_a[mat].iter().cloned());
-				}
-				GeneDiff::Disjoint(a, b) => {
-					let choice = if ctx.rng().gen_bool(0.5) {
-						&par_a[a]
-					} else {
-						&par_b[b]
-					};
-					child.extend(choice.iter().cloned());
-				}
-			}
+		let mut child = par_a.clone();
+		for nod in par_b.node_weights() {
+			if 
 		}
+		self.genes.node_weights()
 
 		WasmGenome {
 			genes: child,
 			fitness: 0.0,
-			params: par_a.params.clone(),
-			result: par_a.result.clone(),
-			locals: par_a.locals.clone(),
+			params: self.params.clone(),
+			result: self.result.clone(),
+			locals: self.locals.clone(), // TODO fix
 		}
-	}
-}
-
-impl Deref for WasmGenome {
-	type Target = [WasmGene<'static>];
-	fn deref(&self) -> &Self::Target {
-		&self.genes
 	}
 }
 

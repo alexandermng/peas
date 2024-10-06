@@ -69,10 +69,10 @@ where
 	/// The fitness of this Genome after evaluated.
 	fn fitness(&self) -> f64;
 
-	/// Crossover with another parent into a new offspring.
+	/// Crossover with another parent into a new offspring. Assumes self is the more fit parent.
 	fn reproduce(&self, other: &Self, ctx: &mut C) -> Self;
 
-	/// Crossover with another parent into a new offspring, consuming this parent.
+	/// Crossover with another parent into a new offspring, consuming this parent. Assumes self is the more fit parent.
 	fn reproduce_into(self, other: &Self, ctx: &mut C) -> Self
 	where
 		Self: Sized,
