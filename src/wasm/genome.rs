@@ -4,14 +4,17 @@ use std::{
 	borrow::Cow,
 	cell::{Ref, RefCell},
 	cmp,
-	collections::HashSet,
+	collections::{HashMap, HashSet},
 	fmt::{Debug, Display},
 	fs,
 	ops::{Deref, DerefMut, Range, RangeBounds},
 };
 
 use eyre::{eyre, Result};
-use petgraph::visit::IntoNodeReferences;
+use petgraph::{
+	graph::NodeIndex,
+	visit::{IntoEdgeReferences, IntoNodeReferences, Visitable},
+};
 use rand::Rng;
 use wasm_encoder::{
 	CodeSection, Encode, ExportKind, ExportSection, Function, FunctionSection, Instruction, Module,
@@ -23,8 +26,15 @@ use crate::{
 	wasm::ir::EncodeInContext,
 };
 
-use super::Context;
-use super::{graph::GeneGraph, ir::ValType as StackValType};
+use super::{graph::GeneNode, Context};
+use super::{
+	graph::{GeneGraph, Node},
+	ir::{I32Op, ValType as StackValType},
+};
+
+pub type NodeMarker = InnovNum;
+
+pub type EdgeMarker = InnovNum;
 
 /// A global unique id within a Genetic Algorithm
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
@@ -46,100 +56,55 @@ impl Display for InnovNum {
 	}
 }
 
-/// A gene of the Wasm Genome, holding its type and historical marker.
-#[derive(Clone)]
-pub struct WasmGene<'a> {
-	pub instr: Instruction<'a>,
-	pub marker: InnovNum,
-
-	// pub(crate) for now until new() stable
-	pub(crate) popty: Cow<'a, [StackValType]>, // OPT: global append-only cache
-	pub(crate) pushty: Cow<'a, [StackValType]>,
-}
-
-impl<'a> WasmGene<'a> {
-	pub fn new(instr: Instruction<'a>, marker: InnovNum) -> Self {
-		use Instruction::*;
-		use StackValType::*;
-		let (popty, pushty) = match &instr {
-			I32Add | I32Sub | I32Mul | I32DivS | I32RemS | I32And | I32Or | I32Xor => {
-				(vec![I32, I32], vec![I32])
-			}
-			I32Eqz => (vec![I32], vec![Bool]),
-			I32Const(_) => (vec![], vec![I32]),
-			// TODO fill rest... also consider adding an argument informing about current stack
-			_ => unimplemented!("instruction type not supported"),
-		};
-		Self {
-			instr,
-			popty: popty.into(),
-			pushty: pushty.into(),
-			marker,
-		}
-	}
-
-	/// Get the type of this instruction
-	pub fn ty(&self) -> (&[StackValType], &[StackValType]) {
-		(&self.popty, &self.pushty)
-	}
-
-	/// Check type-equality.
-	pub fn ty_eq(&self, other: &Self) -> bool {
-		Iterator::eq(self.popty.iter(), other.popty.iter())
-			&& Iterator::eq(self.pushty.iter(), other.pushty.iter())
-	}
-}
-
-impl<'a> PartialEq for WasmGene<'a> {
-	fn eq(&self, other: &Self) -> bool {
-		self.marker == other.marker
-	}
-}
-impl<'a> Eq for WasmGene<'a> {}
-
-impl<'a> Debug for WasmGene<'a> {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "Gene[{}]:", self.marker)?;
-		self.instr.fmt(f)
-	}
-}
-
-/// A comparison of two gene ranges among two genomes
-#[derive(Debug, Clone)]
-pub(crate) enum GeneDiff {
-	Match(Range<usize>),
-	Disjoint(Range<usize>, Range<usize>),
-}
-
 /// The genome of a Wasm agent/individual, with additional genetic data. Can generate a Wasm Agent: bytecode whose
 /// phenotype is the solution for a particular problem.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct WasmGenome {
 	pub genes: GeneGraph,
 	pub fitness: f64,
 	pub params: Vec<StackValType>,
 	pub result: Vec<StackValType>,
 
-	pub(crate) locals: Vec<StackValType>, // local variable types. includes params
+	// pub(crate) locals: Vec<StackValType>, // local variable types. includes params
+	locals: Vec<NodeMarker>, // output of each Node as a local variable
 }
 
 impl WasmGenome {
 	/// Create a new WasmGenome with the given signature for the main function.
-	pub fn new(params: &[StackValType], result: &[StackValType]) -> Self {
+	pub fn new(ctx: &mut Context, params: &[StackValType], result: &[StackValType]) -> Self {
 		let params = params.to_vec();
 		let result = result.to_vec();
-		let locals = params.clone();
-		WasmGenome {
-			genes: GeneGraph::new(),
+		let mut out = WasmGenome {
+			// ...hardcode. MUST update context on init before first gen
+			genes: GeneGraph::default(),
 			fitness: 0.0,
 			params,
 			result,
-
-			locals,
+			locals: Vec::new(),
+		};
+		for i in 0..out.params.len() {
+			out.add_node(ctx, Node::Param(i as u32));
 		}
+		out.add_node(ctx, Node::Result);
+		out
 	}
 
-	pub fn emit(&self) -> Vec<u8> {
+	pub fn get_node<'a>(&self, ctx: &'a Context, innov: NodeMarker) -> &'a Node {
+		&ctx.node_pool[*innov]
+	}
+
+	/// Adds a Node to this structure, backed in the context. Returns the NodeMarker associated with it.
+	pub fn add_node(&mut self, ctx: &mut Context, node: Node) -> NodeMarker {
+		let innovnum = InnovNum(ctx.node_pool.len());
+		match &node {
+			Node::Gene(_) | Node::Param(_) => self.locals.push(innovnum),
+			Node::Result => {}
+		};
+		ctx.node_pool.push(node);
+		innovnum
+	}
+
+	pub fn emit(&self, ctx: &Context) -> Vec<u8> {
 		let mut modu = Module::new();
 		let types = {
 			let mut ts = TypeSection::new();
@@ -162,19 +127,20 @@ impl WasmGenome {
 		};
 		let codes = {
 			let mut cs = CodeSection::new();
-			let locals = self
-				.locals
-				.iter()
-				.enumerate()
-				.map(|(i, &v)| (i as u32, v.into()));
+			let locals = self.locals.iter().enumerate().map(|(i, &v)| {
+				(
+					i as u32,
+					match &ctx.node_pool[*v] {
+						Node::Gene(g) => g.ret[0],
+						Node::Param(p) => self.params[*p as usize],
+						Node::Result => self.result[0], // may be unused tbh
+					}
+					.into(), // my ValType into encoder ValType
+				)
+			});
 			let mut func = Function::new(locals); // main
 			let mut sink = func.into_raw_body();
-			for node in self.genes.node_weights() {
-				node.encode(&self, &mut sink);
-				todo!();
-				// add instructions from genome
-				// func.instruction(&g.instr);
-			}
+			self.genes.encode(&self, &mut sink);
 			Instruction::End.encode(&mut sink);
 			cs.raw(&sink);
 			// cs.function(&func);
@@ -193,79 +159,6 @@ impl WasmGenome {
 		}
 		out
 	}
-
-	/// Show the gene intersection ranges of this genome and another. Returns a tuple of (matches, disjoint),
-	/// where match ranges are of this genome's matching genes and disjoint ranges are a tuple of corresponding
-	/// (self, other) genes. Genes will be [mat, dis, mat, dis... mat?], starting with 0..0 if it starts disjoint.
-	pub(crate) fn diff(&self, other: &Self) -> Vec<GeneDiff> {
-		return todo!();
-		let len_a = self.len(); // par_a = self
-		let len_b = other.len(); // par_b = other
-		let mut diff = Vec::new();
-
-		let (mut cur_a, mut cur_b) = (0, 0); // current indices
-		let (mut last_a, mut last_b) = (0, 0); // index of last matches or disjoints
-		let mut was_matching = true; // true if current range is matching, otherwise disjoint
-		loop {
-			let valid = cur_a < len_a && cur_b < len_b;
-			let matching = valid && (self[cur_a] == other[cur_b]); // short-circuit (useless when invalid)
-			match (valid, was_matching, matching) {
-				/* invalid */
-				(false, false, _) => {
-					// out of bounds while disjoint
-					diff.push(GeneDiff::Disjoint(last_a..len_a, last_b..len_b)); // final disjoint
-					break;
-				}
-				(false, true, _) => {
-					// out of bounds while matching
-					diff.push(GeneDiff::Match(last_a..cur_a)); // final match
-					if cur_a == len_a && cur_b == len_b {
-						break; // clean finish, no extra disjoint bits
-					}
-					was_matching = false;
-					(last_a, last_b) = (cur_a, cur_b);
-					// pass to (false, false, _)
-				}
-				/* valid */
-				(true, true, false) => {
-					// was matching, but now disjoint
-					// log::debug!("\t\tPushing match {last_a}..{cur_a}");
-					diff.push(GeneDiff::Match(last_a..cur_a)); // push matching range
-					was_matching = false; // start disjoint range
-					(last_a, last_b) = (cur_a, cur_b);
-					// pass to (_, false, false)
-				}
-				(true, false, true) => {
-					// was disjoint, but now matching
-					diff.push(GeneDiff::Disjoint(last_a..cur_a, last_b..cur_b)); // push disjoint range
-															 // log::debug!("\t\tPushing disjoint ({last_a}..{cur_a}, {last_b}..{cur_b})");
-					was_matching = true; // start matching range
-					(last_a, last_b) = (cur_a, cur_b);
-					// pass to (_, true, true)
-				}
-				(true, false, false) => {
-					// cont valid disjoint
-					if let Some(mat_b) = other[last_b..].iter().position(|b| *b == self[cur_a]) {
-						cur_b = last_b + mat_b; // found match, go next
-						debug_assert!(self[cur_a] == other[cur_b], "not real match");
-						continue; // pass to (true, false, true)
-					}
-					cur_a += 1;
-					// may invalidate a, => pass to (false, false, _)
-					// else pass to (true, false, ?)
-				}
-				(true, true, true) => {
-					// cont valid match
-					cur_a += 1;
-					cur_b += 1;
-					// may invalidate a or b, => pass to (false, true, _)
-					// else pass to (true, true, ?)
-				}
-			}
-		}
-		log::debug!("Found diff ranges for (0..{len_a}, 0..{len_b}): {diff:?}");
-		diff
-	}
 }
 
 // TODO move or make configurable
@@ -276,8 +169,16 @@ impl Genome<Context> for WasmGenome {
 	fn dist(&self, other: &Self) -> f64 {
 		// NOTE: just edges? what about nodes? gotta check in NEAT impl.
 		// OPT bitset? how to deal with highest common?
-		let ge_a: HashSet<InnovNum> = self.genes.edge_weights().map(|w| w.marker).collect();
-		let ge_b: HashSet<InnovNum> = other.genes.edge_weights().map(|w| w.marker).collect();
+		let ge_a: HashSet<InnovNum> = self
+			.genes
+			.edge_references()
+			.map(|(_, _, w)| w.marker)
+			.collect();
+		let ge_b: HashSet<InnovNum> = other
+			.genes
+			.edge_references()
+			.map(|(_, _, w)| w.marker)
+			.collect();
 		let highest_common = *ge_a.union(&ge_b).max().expect("graph non-empty");
 
 		let n = cmp::max(ge_a.len(), ge_b.len()) as f64;
@@ -301,16 +202,15 @@ impl Genome<Context> for WasmGenome {
 
 	fn reproduce(&self, other: &Self, mut ctx: &mut Context) -> Self {
 		log::debug!("Crossing over:\n\ta = {self:?}\n\tb = {other:?}");
-		let par_a = self.genes;
-		let par_b = other.genes;
-		let gn_a: HashSet<InnovNum> = par_a.node_weights()
-		
+		let par_a = &self.genes;
+		let par_b = &other.genes;
+		// let gn_a: HashMap<InnovNum, NodeIndex<u32>> = par_a
+		// 	.node_references()
+		// 	.map(|(idx, innov)| (innov, idx))
+		// 	.collect();
 
 		let mut child = par_a.clone();
-		for nod in par_b.node_weights() {
-			if 
-		}
-		self.genes.node_weights()
+		child.extend(par_b.edge_references());
 
 		WasmGenome {
 			genes: child,
@@ -324,10 +224,9 @@ impl Genome<Context> for WasmGenome {
 
 impl Display for WasmGenome {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.write_str("Genome[")?;
-		for b in self.emit() {
-			write!(f, "{:X}", b)?;
-		}
-		f.write_str("]")
+		write!(f, "Genome[ todo ]")
+		// for b in self.emit() {
+		// 	write!(f, "{:X}", b)?;
+		// }
 	}
 }

@@ -12,8 +12,8 @@ use rand::{
 use wasm_encoder::{Encode, Instruction};
 use wasmparser::names;
 
-use crate::wasm::{Context, InnovNum, WasmGene, WasmGenome};
-use crate::{genetic::Mutator, wasm::StackValType};
+use super::{ir::ValType, Context, InnovNum, WasmGenome};
+use crate::genetic::Mutator;
 
 /// Mutation by individual genes
 pub trait WasmMutator {

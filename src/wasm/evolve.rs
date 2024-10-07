@@ -21,21 +21,20 @@ use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterato
 use wasm_encoder::{Instruction, ValType};
 use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
 
+use crate::genetic::{
+	self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Problem, Selector, Solution,
+};
 use crate::{
 	genetic::AsContext,
 	params::GenAlgParams,
 	wasm::{
-		genome::{InnovNum, WasmGene, WasmGenome},
+		genome::{InnovNum, WasmGenome},
 		ir::ValType as StackValType,
 		mutations::AddOperation,
 	},
 };
-use crate::{
-	genetic::{self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Problem, Selector, Solution},
-	wasm::GeneDiff,
-};
 
-use super::mutations::MutationLog;
+use super::{graph::GeneNodePool, mutations::MutationLog};
 
 /// Assembled phenotype of an individual in a genetic algorithm. Used as a solution to a problem.
 #[derive(Clone)]
@@ -94,9 +93,10 @@ pub struct Context {
 	pub generation: usize, // current generation
 	pub max_fitness: f64,  // current top fitness
 	pub avg_fitness: f64,  // current mean fitness
+	pub rng: Pcg64Mcg,     // reproducible rng
 
-	pub(crate) rng: Pcg64Mcg,                // reproducible rng
-	innov_cnt: InnovNum,                     // innovation number count
+	pub(crate) node_pool: GeneNodePool, // full cache of all nodes, with index acting as the innovation number
+	innov_cnt: InnovNum,                // innovation number count
 	cur_innovs: HashMap<InnovKey, InnovNum>, // running log of current unique innovations, cleared per-generation.
 }
 
@@ -107,6 +107,8 @@ impl Context {
 			max_fitness: 0.0,
 			avg_fitness: 0.0,
 			rng: Pcg64Mcg::seed_from_u64(seed),
+
+			node_pool: GeneNodePool::new(),
 			innov_cnt: InnovNum(0),
 			cur_innovs: HashMap::new(),
 		}
@@ -256,7 +258,7 @@ where
 					log::info!("\t{} <-- {}", p.fitness, p);
 				}
 				let filename = format!("{}/gen_{}.wasm", self.log_file, ctx.generation);
-				let topguy = pop[0].emit();
+				let topguy = pop[0].emit(&ctx);
 				fs::write(filename, topguy);
 			}
 
@@ -372,10 +374,11 @@ where
 	}
 
 	fn evaluate(&mut self) {
+		let ctx = self.ctx.borrow();
 		let agents: Vec<_> = self
 			.pop
 			.iter() // OPT can I par_iter here? I think I need WasmGenome: Send / Sync
-			.map(WasmGenome::emit)
+			.map(|g| g.emit(&ctx))
 			.map(|b| Agent::new(self.engine.clone(), &b))
 			.collect();
 		let fitnai: Vec<_> = agents.par_iter().map(|a| self.problem.fitness(a)).collect();
