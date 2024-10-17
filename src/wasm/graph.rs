@@ -5,12 +5,12 @@
 
 use std::ops::{Deref, DerefMut};
 
-use petgraph::prelude::*;
+use petgraph::{algo::toposort, prelude::*};
 use wasm_encoder::{BlockType, Encode, Instruction};
 
 use super::{
 	ir::{EncodeInContext, I32Op, IntoInstruction, ValType},
-	EdgeMarker, InnovNum, NodeMarker, WasmGenome,
+	Context, EdgeMarker, InnovNum, NodeMarker, WasmGenome,
 };
 
 /// Acts as the core of a Wasm Genome, a graph that emits Wasm.
@@ -43,10 +43,25 @@ impl DerefMut for GeneGraph {
 	}
 }
 
-impl EncodeInContext for GeneGraph {
-	fn encode(&self, ctx: &WasmGenome, sink: &mut Vec<u8>) {
-		// TODO: encode.
-		todo!()
+impl EncodeInContext<(Context, WasmGenome)> for GeneGraph {
+	fn encode(&self, ctx: &(Context, WasmGenome), sink: &mut Vec<u8>) {
+		let (ctx, genome) = ctx;
+		let graph = &self.inner;
+		let nodes = toposort(graph, None).expect("should have no cycles");
+		for id in nodes {
+			let node = genome.get_node(ctx, id);
+			for (_, _, e) in graph.edges_directed(id, Incoming) {
+				e.encode(genome, sink); // push params
+			}
+			match node {
+				Node::Gene(g) => {
+					g.encode(genome, sink); // leaves output on stack
+					Instruction::LocalSet((*id) as u32).encode(sink);
+				}
+				Node::Param(_) => {}
+				Node::Result => {} // whatever's left on stack
+			}
+		}
 	}
 }
 
@@ -76,6 +91,7 @@ impl EncodeInContext for Node {
 }
 
 /// A node in a graph representing a gene. Found in a `GeneNodePool`, indexed by innovation number.
+/// Encodes to a block which leaves one value on the stack.
 #[derive(Clone, Debug)]
 pub struct GeneNode<I: IntoInstruction = I32Op> {
 	pub instrs: Vec<I>,
@@ -110,6 +126,15 @@ impl EncodeInContext for GeneNode {
 struct VarEdge {
 	pub marker: EdgeMarker, // unique for each edge
 	pub ty: ValType,        // type of variable
-	pub local_idx: usize,   // index of variable in function locals
+	pub local_idx: u32, // index of variable in function locals (aligns with the NodeMarker it's from)
 	pub enabled: bool,
+}
+
+impl EncodeInContext for VarEdge {
+	fn encode(&self, ctx: &WasmGenome, sink: &mut Vec<u8>) {
+		if !self.enabled {
+			return;
+		}
+		Instruction::LocalGet(self.local_idx).encode(sink);
+	}
 }
