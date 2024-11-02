@@ -9,11 +9,20 @@ use rand::{
 	seq::SliceRandom,
 	Rng,
 };
+use serde::{Deserialize, Serialize};
 use wasm_encoder::{Encode, Instruction};
 use wasmparser::names;
 
 use crate::wasm::{Context, InnovNum, WasmGene, WasmGenome};
 use crate::{genetic::Mutator, wasm::StackValType};
+
+/// A list of all available mutations
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "type")]
+pub enum WasmMutations {
+	AddBinaryOp(AddOperation),
+	ChangeRoot(ChangeRoot),
+}
 
 /// Mutation by individual genes
 pub trait WasmMutator {
@@ -91,6 +100,7 @@ impl PartialEq for MutationLog {
 impl Eq for MutationLog {}
 
 /// Adds an Operation after a random gene. Neutral.
+#[derive(Serialize, Deserialize, Debug)]
 pub struct AddOperation {
 	rate: f64,
 }
@@ -152,6 +162,7 @@ impl WasmMutator for AddOperation {
 	}
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ChangeRoot {
 	rate: f64,
 }
