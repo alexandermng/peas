@@ -24,6 +24,7 @@ where
 	#[serde(skip_serializing)] // TODO serialize_with just name
 	pub selector: Box<dyn Selector<G, C>>, // includes rate
 
+	#[serde(skip_serializing)] // TODO serialize_with just name
 	pub init_genome: G,
 
 	pub elitism_rate: f64,
@@ -59,7 +60,7 @@ pub struct GenAlgParamsCLI {
 }
 
 impl GenAlgParamsOpts {
-	fn build(self) -> GenAlgParams {
+	pub fn build(self) -> GenAlgParams {
 		let seed = self.seed.unwrap_or(thread_rng().gen());
 		let log_file = self.log_file.unwrap_or_else(|| format!("trial_{}.log", 0)); // TODO actual timestamp
 		GenAlgParams {

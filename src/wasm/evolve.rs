@@ -23,7 +23,7 @@ use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults,
 
 use crate::{
 	genetic::AsContext,
-	params::GenAlgParams,
+	params::{GenAlgParams, GenAlgParamsOpts},
 	wasm::{
 		genome::{InnovNum, StackValType, WasmGene, WasmGenome},
 		mutations::AddOperation,
@@ -169,15 +169,10 @@ where
 	P::Out: WasmResults,
 {
 	pub fn run(&mut self) {
-		self.log_file = match &self.params.log_file {
-			Some(s) => s.clone(),
-			None => format!("trial_{}.log", self.seed),
-		};
-
 		log::info!("Beginning GA trial with seed {}", self.seed);
 		self.init();
 
-		fs::create_dir(&self.log_file).unwrap();
+		fs::create_dir(&self.params.log_file).unwrap();
 
 		while self.epoch() {}
 	}
@@ -205,7 +200,6 @@ where
 			stop_cond,
 			params,
 			seed,
-			log_file,
 
 			// Runtime use
 			engine: Engine::default(),
@@ -248,7 +242,7 @@ where
 				for p in self.pop.iter().take(10) {
 					log::info!("\t{} <-- {}", p.fitness, p);
 				}
-				let filename = format!("{}/gen_{}.wasm", self.log_file, ctx.generation);
+				let filename = format!("{}/gen_{}.wasm", self.params.log_file, ctx.generation);
 				let topguy = pop[0].emit();
 				fs::write(filename, topguy);
 			}
@@ -438,18 +432,19 @@ where
 			.unwrap_or_else(|| Box::new(|_: &mut Context, _: &[WasmGenome]| true)); // optional
 		let init_genome = self.starter.unwrap();
 
-		let params = GenAlgParams {
+		// TODO compose with params builder somehow :/
+		let params = GenAlgParamsOpts {
 			// TODO assert crossover_rate + elitism_rate <= 1.0
-			pop_size: self.pop_size.unwrap(),
-
-			elitism_rate: self.elitism_rate.unwrap_or_default(), // optional, default 0.0
-			enable_speciation: self.enable_speciation.unwrap_or_default(), // optional, default false
-			crossover_rate: self.crossover_rate.unwrap_or_default(), // optional, default 0.0
-			mutation_rate: self.mutation_rate.unwrap(),          // TODO: use mutation rate
-			num_generations: self.generations.unwrap(),
 			seed: self.seed,
+			pop_size: self.pop_size,
+			num_generations: self.generations,
+			mutation_rate: self.mutation_rate,
+			elitism_rate: self.elitism_rate,
+			crossover_rate: self.crossover_rate,
+			enable_speciation: self.enable_speciation,
 			log_file: self.log_file,
-		};
+		}
+		.build();
 
 		WasmGenAlg::new(params, problem, mutation, selection, init_genome, stop_cond)
 	}
