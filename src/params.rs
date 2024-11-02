@@ -1,5 +1,8 @@
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
+use std::fs;
+use toml;
+use std::path::Path;
 
 use crate::{
 	genetic::{AsContext, Genome, Mutator, OnceMutator, Predicate, Problem, Selector},
@@ -46,8 +49,6 @@ pub struct GenAlgParamsOpts {
 	pub elitism_rate: Option<f64>,
 	pub crossover_rate: Option<f64>,
 	pub enable_speciation: Option<bool>, // TODO add more?
-
-	pub log_file: Option<String>,
 }
 
 /// Input command-line arguments
@@ -60,6 +61,12 @@ pub struct GenAlgParamsCLI {
 }
 
 impl GenAlgParamsOpts {
+	fn from_file(filename: &str) -> Self {
+		let contents = fs::read_to_string(filename).unwrap();
+		let config = toml::from_str(&contents);
+		return config.unwrap();
+	}
+
 	pub fn build(self) -> GenAlgParams {
 		let seed = self.seed.unwrap_or(thread_rng().gen());
 		let log_file = self.log_file.unwrap_or_else(|| format!("trial_{}.log", 0)); // TODO actual timestamp
@@ -72,7 +79,7 @@ impl GenAlgParamsOpts {
 			crossover_rate: self.crossover_rate.unwrap_or(0.95),
 			enable_speciation: self.enable_speciation.unwrap_or(false),
 
-			log_file,
+			log_file: self.log_file,
 		}
 	}
 }
