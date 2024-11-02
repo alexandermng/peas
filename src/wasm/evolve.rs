@@ -149,11 +149,10 @@ where
 	problem: P,
 	mutator: M,
 	selector: S,
-	init_genome: WasmGenome,
+	init_genome: WasmGenome, // copied from params
 	stop_cond: Box<dyn Predicate<WasmGenome, Context>>,
 	params: GenAlgParams,
-	seed: u64,
-	log_file: String,
+	seed: u64, // copied from params
 
 	// Runtime use
 	engine: Engine,
@@ -170,7 +169,6 @@ where
 	P::Out: WasmResults,
 {
 	pub fn run(&mut self) {
-		self.seed = self.params.seed.unwrap(); // TODO default
 		self.log_file = match &self.params.log_file {
 			Some(s) => s.clone(),
 			None => format!("trial_{}.log", self.seed),
@@ -197,11 +195,7 @@ where
 		init_genome: WasmGenome,
 		stop_cond: Box<dyn Predicate<WasmGenome, Context>>,
 	) -> Self {
-		let seed = params.seed.unwrap_or_else(|| thread_rng().gen());
-		let log_file = params
-			.log_file
-			.clone()
-			.unwrap_or_else(|| format!("trial_{}.log", seed));
+		let seed = params.seed;
 		let size = params.pop_size;
 		WasmGenAlg {
 			problem,

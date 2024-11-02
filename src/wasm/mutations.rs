@@ -19,9 +19,19 @@ use crate::{genetic::Mutator, wasm::StackValType};
 /// A list of all available mutations
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type")]
-pub enum WasmMutations {
+pub enum WasmMutation {
 	AddBinaryOp(AddOperation),
 	ChangeRoot(ChangeRoot),
+	// Sequence(Vec<WasmMutation>),
+}
+
+impl Mutator<WasmGenome, Context> for WasmMutation {
+	fn mutate(&self, ctx: &mut Context, indiv: WasmGenome) -> WasmGenome {
+		match self {
+			WasmMutation::AddBinaryOp(add_operation) => add_operation.mutate(ctx, indiv),
+			WasmMutation::ChangeRoot(change_root) => change_root.mutate(ctx, indiv),
+		}
+	}
 }
 
 /// Mutation by individual genes

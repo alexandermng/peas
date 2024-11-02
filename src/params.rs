@@ -1,26 +1,37 @@
+use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 
-use crate::genetic::{AsContext, Genome, Mutator, OnceMutator, Predicate, Problem, Selector};
-
-use rand::{
-	distributions::{Distribution, Uniform},
-	thread_rng, Rng,
+use crate::{
+	genetic::{AsContext, Genome, Mutator, OnceMutator, Predicate, Problem, Selector},
+	wasm::{mutations::WasmMutation, Context, WasmGenome},
 };
 
 /// Actual parameters for the genetic algorithm. Can be saved as an output to a file and subsequently loaded in to replicate runs.
-#[derive(Serialize, Debug)]
-pub struct GenAlgParams {
+#[derive(Serialize)]
+pub struct GenAlgParams<G = WasmGenome, C = Context, M = WasmMutation>
+where
+	G: Genome<C>,
+	C: AsContext,
+	M: Mutator<G, C>,
+{
 	pub seed: u64, // set seed for the run
 	pub pop_size: usize,
 	pub num_generations: usize,
-	// pub mutation: Box<
+
+	pub mutators: Vec<M>,
 	pub mutation_rate: f64, // TODO consider
+
+	#[serde(skip_serializing)] // TODO serialize_with just name
+	pub selector: Box<dyn Selector<G, C>>, // includes rate
+
+	pub init_genome: G,
+
 	pub elitism_rate: f64,
 	pub crossover_rate: f64,
 	pub enable_speciation: bool, // TODO add more?
 
 	#[serde(skip_serializing)]
-	pub log_file: Option<String>,
+	pub log_file: String,
 }
 
 /// Input options to set the parameters. Can be read from a config file.
@@ -49,8 +60,10 @@ pub struct GenAlgParamsCLI {
 
 impl GenAlgParamsOpts {
 	fn build(self) -> GenAlgParams {
-		GenAlgParams{
-			seed: self.seed.unwrap_or(thread_rng().gen()),
+		let seed = self.seed.unwrap_or(thread_rng().gen());
+		let log_file = self.log_file.unwrap_or_else(|| format!("trial_{}.log", 0)); // TODO actual timestamp
+		GenAlgParams {
+			seed,
 			pop_size: self.pop_size.unwrap_or(100),
 			num_generations: self.num_generations.unwrap_or(20),
 			mutation_rate: self.mutation_rate.unwrap_or(1.0),
@@ -58,7 +71,7 @@ impl GenAlgParamsOpts {
 			crossover_rate: self.crossover_rate.unwrap_or(0.95),
 			enable_speciation: self.enable_speciation.unwrap_or(false),
 
-			log_file: self.log_file,
+			log_file,
 		}
 	}
 }
