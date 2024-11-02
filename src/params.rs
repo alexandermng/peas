@@ -21,6 +21,15 @@ pub struct GenAlgParams {
 #[derive(Deserialize)]
 pub struct GenAlgParamsOpts {
 	// TODO take GenAlgParams and... make everything optional. and String-like.
+	pub seed: Option<u64>,
+	pub pop_size: Option<usize>,
+	pub num_generations: Option<usize>,
+	pub mutation_rate: Option<f64>, // TODO consider
+	pub elitism_rate: Option<f64>,
+	pub crossover_rate: Option<f64>,
+	pub enable_speciation: Option<bool>, // TODO add more?
+
+	pub log_file: Option<String>
 }
 
 /// Input command-line arguments
@@ -34,7 +43,17 @@ pub struct GenAlgParamsCLI {
 
 impl GenAlgParamsOpts {
 	fn build(self) -> GenAlgParams {
-		todo!()
+		GenAlgParams{
+			seed: self.seed.unwrap_or(0),
+			pop_size: self.pop_size.unwrap_or(0),
+			num_generations: self.num_generations.unwrap_or(0),
+			mutation_rate: self.mutation_rate.unwrap_or(0.0),
+			elitism_rate: self.elitism_rate.unwrap_or(0.0),
+			crossover_rate: self.crossover_rate.unwrap_or(0.0),
+			enable_speciation: self.enable_speciation.unwrap_or(false),
+
+			log_file: self.log_file
+		}
 	}
 }
 
