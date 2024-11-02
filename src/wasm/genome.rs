@@ -97,7 +97,7 @@ impl WasmGenome {
 	pub fn add_node(&mut self, ctx: &mut Context, node: Node) -> NodeMarker {
 		let innovnum = InnovNum(ctx.node_pool.len());
 		match &node {
-			Node::Gene(_) | Node::Param(_) => self.locals.push(innovnum),
+			Node::Gene(_) | Node::Param(_) => self.locals.push(innovnum), // note locals has 1-1 corresp with NodeMarkers, so locals[innov] works
 			Node::Result => {}
 		};
 		ctx.node_pool.push(node);
@@ -140,7 +140,7 @@ impl WasmGenome {
 			});
 			let mut func = Function::new(locals); // main
 			let mut sink = func.into_raw_body();
-			self.genes.encode(&self, &mut sink);
+			self.genes.encode(&(ctx, self), &mut sink);
 			Instruction::End.encode(&mut sink);
 			cs.raw(&sink);
 			// cs.function(&func);
@@ -209,6 +209,7 @@ impl Genome<Context> for WasmGenome {
 		// 	.map(|(idx, innov)| (innov, idx))
 		// 	.collect();
 
+		// TODO edit to only include the disjoint from the MORE FIT parent (self/par_a).
 		let mut child = par_a.clone();
 		child.extend(par_b.edge_references());
 

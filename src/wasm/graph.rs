@@ -43,9 +43,9 @@ impl DerefMut for GeneGraph {
 	}
 }
 
-impl EncodeInContext<(Context, WasmGenome)> for GeneGraph {
-	fn encode(&self, ctx: &(Context, WasmGenome), sink: &mut Vec<u8>) {
-		let (ctx, genome) = ctx;
+impl EncodeInContext<(&Context, &WasmGenome)> for GeneGraph {
+	fn encode(&self, ctx: &(&Context, &WasmGenome), sink: &mut Vec<u8>) {
+		let &(ctx, genome) = ctx;
 		let graph = &self.inner;
 		let nodes = toposort(graph, None).expect("should have no cycles");
 		for id in nodes {
