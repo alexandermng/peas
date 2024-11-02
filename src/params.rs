@@ -2,6 +2,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::genetic::{AsContext, Genome, Mutator, OnceMutator, Predicate, Problem, Selector};
 
+use rand::{
+	distributions::{Distribution, Uniform},
+	thread_rng, Rng,
+};
+
 /// Parameters for the program. Can be output to a file.
 #[derive(Serialize)]
 pub struct GenAlgParams {
@@ -44,12 +49,12 @@ pub struct GenAlgParamsCLI {
 impl GenAlgParamsOpts {
 	fn build(self) -> GenAlgParams {
 		GenAlgParams{
-			seed: self.seed.unwrap_or(0),
-			pop_size: self.pop_size.unwrap_or(0),
-			num_generations: self.num_generations.unwrap_or(0),
-			mutation_rate: self.mutation_rate.unwrap_or(0.0),
-			elitism_rate: self.elitism_rate.unwrap_or(0.0),
-			crossover_rate: self.crossover_rate.unwrap_or(0.0),
+			seed: self.seed.unwrap_or(thread_rng().gen()),
+			pop_size: self.pop_size.unwrap_or(100),
+			num_generations: self.num_generations.unwrap_or(20),
+			mutation_rate: self.mutation_rate.unwrap_or(1.0),
+			elitism_rate: self.elitism_rate.unwrap_or(0.05),
+			crossover_rate: self.crossover_rate.unwrap_or(0.95),
 			enable_speciation: self.enable_speciation.unwrap_or(false),
 
 			log_file: self.log_file
