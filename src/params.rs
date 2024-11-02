@@ -27,6 +27,8 @@ pub struct GenAlgParamsOpts {
 #[derive(clap::Parser, Debug)]
 pub struct GenAlgParamsCLI {
 	// TODO -F / --config [filename]
+	pub config_filename: Option<String>,
+	pub seed: Option<u64>
 	// TODO -s / --seed [seed]
 }
 
