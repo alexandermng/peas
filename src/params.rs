@@ -17,7 +17,7 @@ pub struct GenAlgParams {
 	pub log_file: Option<String>,
 }
 
-/// Input options to the
+/// Input options to set the parameters. Can be read from a config file.
 #[derive(Deserialize)]
 pub struct GenAlgParamsOpts {
 	// TODO take GenAlgParams and... make everything optional. and String-like.
@@ -30,8 +30,14 @@ pub struct GenAlgParamsCLI {
 	// TODO -s / --seed [seed]
 }
 
+impl GenAlgParamsOpts {
+	fn build(self) -> GenAlgParams {
+		todo!()
+	}
+}
+
 impl From<GenAlgParamsOpts> for GenAlgParams {
 	fn from(value: GenAlgParamsOpts) -> Self {
-		todo!()
+		value.build()
 	}
 }
