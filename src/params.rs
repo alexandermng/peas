@@ -49,16 +49,22 @@ pub struct GenAlgParamsOpts {
 	pub elitism_rate: Option<f64>,
 	pub crossover_rate: Option<f64>,
 	pub enable_speciation: Option<bool>, // TODO add more?
+
+	pub log_file: Option<String> //we'll see about this
 }
 
 /// Input command-line arguments
 #[derive(clap::Parser, Debug)]
 pub struct GenAlgParamsCLI {
 	// TODO -F / --config [filename]  (get rid of this comment and add real description)
+	#[arg(short='F',long="config")]
 	pub config: Option<String>,
 	// TODO -s / --seed [seed] (get rid of this comment and add real description)
+	#[arg(short='s',long="seed")]
 	pub seed: Option<u64>,
 }
+
+
 
 impl GenAlgParamsOpts {
 	fn from_file(filename: &str) -> Self {
@@ -79,7 +85,7 @@ impl GenAlgParamsOpts {
 			crossover_rate: self.crossover_rate.unwrap_or(0.95),
 			enable_speciation: self.enable_speciation.unwrap_or(false),
 
-			log_file: self.log_file,
+			log_file: self.log_file.unwrap(),
 		}
 	}
 }
