@@ -40,12 +40,28 @@ where
 
 /// Input options to set the parameters. Can be read from a config file.
 #[derive(Deserialize, Debug)]
-pub struct GenAlgParamsOpts {
+pub struct GenAlgParamsOpts<G = WasmGenome, C = Context, M = WasmMutation> 
+where 
+G: Genome<C>,
+C: AsContext,
+M: Mutator<G, C>,
+{
 	// TODO take GenAlgParams and... make everything optional. and String-like.
 	pub seed: Option<u64>,
 	pub pop_size: Option<usize>,
 	pub num_generations: Option<usize>,
+
+	pub mutators: Vec<M>,
 	pub mutation_rate: Option<f64>, // TODO consider
+
+	#[serde[skip_deserializing]]
+	//#[debug(skip)]
+	pub selector: Box<dyn Selector<G, C>>,
+
+	//#[debug(skip)]
+	#[serde[skip_deserializing]]
+	pub init_genome: G,
+
 	pub elitism_rate: Option<f64>,
 	pub crossover_rate: Option<f64>,
 	pub enable_speciation: Option<bool>, // TODO add more?
@@ -80,7 +96,10 @@ impl GenAlgParamsOpts {
 			seed,
 			pop_size: self.pop_size.unwrap_or(100),
 			num_generations: self.num_generations.unwrap_or(20),
+			mutators: self.mutators.or(Vec::new()), //FIXME?
 			mutation_rate: self.mutation_rate.unwrap_or(1.0),
+			selector: self.selector, //FIXME?
+			init_genome: self.init_genome, //FIXME?
 			elitism_rate: self.elitism_rate.unwrap_or(0.05),
 			crossover_rate: self.crossover_rate.unwrap_or(0.95),
 			enable_speciation: self.enable_speciation.unwrap_or(false),
