@@ -3,11 +3,12 @@
 //!
 
 use peas::{
-	genetic::{Mutator, Problem, Solution},
+	genetic::{Problem, Solution},
+	params::GenAlgParams,
 	selection::TournamentSelection,
 	wasm::{
-		mutations::{AddOperation, ChangeRoot, SequenceMutator},
-		Context, InnovNum, StackValType, WasmGenAlgBuilder, WasmGene, WasmGenome,
+		mutations::{AddOperation, ChangeRoot, WasmMutation},
+		InnovNum, StackValType, WasmGenAlg, WasmGene, WasmGenome,
 	},
 };
 use rand::{
@@ -118,14 +119,9 @@ fn main() {
 
 	let prob = Sum3::new(1000);
 	let seed: u64 = thread_rng().gen();
-	let muts: [&dyn Mutator<_, _>; 2] = [
-		// for use in sequence
-		&AddOperation::from_rate(0.2), // local variable
-		&ChangeRoot::from_rate(0.3),   // consts, locals, push onto stack
-
-		                               // NeutralAddLocal::with_rate(0.01),
-		                               // SwapOp::with_rate(0.02),
-		                               // AddTee::with_rate(0.02),
+	let muts: Vec<WasmMutation> = vec![
+		AddOperation::from_rate(0.2).into(), // local variable
+		ChangeRoot::from_rate(0.3).into(),   // consts, locals, push onto stack
 	];
 	let init = {
 		let params = &[StackValType::I32, StackValType::I32, StackValType::I32];
@@ -135,23 +131,20 @@ fn main() {
 			.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
 		wg
 	};
-	let mut ga = WasmGenAlgBuilder::default()
-		.problem(prob)
-		.pop_size(100)
-		.generations(100)
-		.stop_condition(Box::new(|ctx: &mut Context, _: &[WasmGenome]| -> bool {
-			ctx.max_fitness >= 1.0
-		}))
-		.selection(TournamentSelection::new(0.6, 3, 0.9, false)) // can do real tournament selection when selection is fixed
-		.enable_elitism(true)
-		.elitism_rate(0.05)
-		.enable_crossover(true)
-		.crossover_rate(0.95)
-		// .crossover()
-		.mutation_rate(1.0)
-		.mutation(SequenceMutator::from(&muts[..]))
-		.init_genome(init)
+	let params = GenAlgParams::builder()
 		.seed(seed)
+		.pop_size(100)
+		.num_generations(100)
+		.max_fitness(1.0)
+		.mutators(muts)
+		.mutation_rate(1.0)
+		.selector(TournamentSelection::new(0.6, 3, 0.9, false)) // can do real tournament selection when selection is fixed
+		.init_genome(init)
+		.elitism_rate(0.05)
+		.crossover_rate(0.95)
+		.enable_speciation(false)
+		.output_dir(format!("trial_{seed}.log"))
 		.build();
+	let mut ga = WasmGenAlg::new(params, prob);
 	ga.run();
 }

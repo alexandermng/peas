@@ -9,6 +9,7 @@ use std::{
 	ops::Range,
 };
 
+use bon::{builder, Builder};
 use eyre::{eyre, DefaultHandler, OptionExt, Result};
 use rand::{
 	distributions::Uniform,
@@ -18,12 +19,14 @@ use rand::{
 };
 use rand_pcg::Pcg64Mcg;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use serde::Deserialize;
 use wasm_encoder::{Instruction, ValType};
 use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
 
 use crate::{
 	genetic::AsContext,
-	params::GenAlgParams,
+	params::{GenAlgParams, GenAlgParamsOpts},
+	selection::TournamentSelection,
 	wasm::{
 		genome::{InnovNum, StackValType, WasmGene, WasmGenome},
 		mutations::AddOperation,
@@ -34,7 +37,7 @@ use crate::{
 	wasm::GeneDiff,
 };
 
-use super::mutations::MutationLog;
+use super::mutations::{MutationLog, WasmMutation};
 
 /// Assembled phenotype of an individual in a genetic algorithm. Used as a solution to a problem.
 #[derive(Clone)]
@@ -137,6 +140,8 @@ impl AsContext for Context {
 	}
 }
 
+type WasmGenAlgParams<M, S> = GenAlgParams<WasmGenome, Context, M, S>;
+
 /// A genetic algorithm for synthesizing WebAssembly modules to solve a problem. The problem must specify
 /// a fitness function. Parametrized across the problem, the mutation type, and the selection type.
 pub struct WasmGenAlg<P, M, S>
@@ -146,14 +151,15 @@ where
 	S: Selector<WasmGenome, Context>,
 {
 	// Parameters
-	problem: P,
-	mutator: M,
-	selector: S,
-	init_genome: WasmGenome,
-	stop_cond: Box<dyn Predicate<WasmGenome, Context>>,
-	params: GenAlgParams,
-	seed: u64,
-	log_file: String,
+	pub problem: P,
+	pub params: WasmGenAlgParams<M, S>,
+
+	mutators: Vec<M>,                                   // copied from params
+	selector: S,                                        // copied from params
+	init_genome: WasmGenome,                            // copied from params
+	stop_cond: Box<dyn Predicate<WasmGenome, Context>>, // TODO... idk fix
+
+	seed: u64, // copied from params
 
 	// Runtime use
 	engine: Engine,
@@ -164,22 +170,45 @@ where
 impl<P, M, S> WasmGenAlg<P, M, S>
 where
 	P: Problem + Sync,
-	M: Mutator<WasmGenome, Context>,
-	S: Selector<WasmGenome, Context>,
+	M: Mutator<WasmGenome, Context> + Clone,
+	S: Selector<WasmGenome, Context> + Clone,
 	P::In: WasmParams,
 	P::Out: WasmResults,
 {
-	pub fn run(&mut self) {
-		self.seed = self.params.seed.unwrap(); // TODO default
-		self.log_file = match &self.params.log_file {
-			Some(s) => s.clone(),
-			None => format!("trial_{}.log", self.seed),
+	pub fn new(params: WasmGenAlgParams<M, S>, problem: P) -> Self {
+		let size = params.pop_size;
+		let seed = params.seed;
+		let mutators = params.mutators.clone();
+		let selector = params.selector.clone();
+		let init_genome = params.init_genome.clone();
+		let stop_cond: Box<dyn Predicate<WasmGenome, Context>> = match params.max_fitness {
+			Some(x) => Box::new(move |ctx: &mut Context, _: &[WasmGenome]| -> bool {
+				ctx.max_fitness >= x
+			}),
+			None => Box::new(|_: &mut Context, _: &[WasmGenome]| false),
 		};
+		WasmGenAlg {
+			problem,
+			params,
 
+			mutators,
+			selector,
+			init_genome,
+			stop_cond,
+			seed,
+
+			// Runtime use
+			engine: Engine::default(),
+			ctx: RefCell::new(Context::new(seed)),
+			pop: Vec::with_capacity(size),
+		}
+	}
+
+	pub fn run(&mut self) {
 		log::info!("Beginning GA trial with seed {}", self.seed);
 		self.init();
 
-		fs::create_dir(&self.log_file).unwrap();
+		fs::create_dir(&self.params.output_dir).unwrap();
 
 		while self.epoch() {}
 	}
@@ -187,37 +216,6 @@ where
 	fn init(&mut self) {
 		self.pop
 			.extend((0..self.params.pop_size).map(|_| self.init_genome.clone()));
-	}
-
-	fn new(
-		params: GenAlgParams,
-		problem: P,
-		mutator: M,
-		selector: S,
-		init_genome: WasmGenome,
-		stop_cond: Box<dyn Predicate<WasmGenome, Context>>,
-	) -> Self {
-		let seed = params.seed.unwrap_or_else(|| thread_rng().gen());
-		let log_file = params
-			.log_file
-			.clone()
-			.unwrap_or_else(|| format!("trial_{}.log", seed));
-		let size = params.pop_size;
-		WasmGenAlg {
-			problem,
-			mutator,
-			selector,
-			init_genome,
-			stop_cond,
-			params,
-			seed,
-			log_file,
-
-			// Runtime use
-			engine: Engine::default(),
-			ctx: RefCell::new(Context::new(seed)),
-			pop: Vec::with_capacity(size),
-		}
 	}
 }
 
@@ -254,7 +252,7 @@ where
 				for p in self.pop.iter().take(10) {
 					log::info!("\t{} <-- {}", p.fitness, p);
 				}
-				let filename = format!("{}/gen_{}.wasm", self.log_file, ctx.generation);
+				let filename = format!("{}/gen_{}.wasm", self.params.output_dir, ctx.generation);
 				let topguy = pop[0].emit();
 				fs::write(filename, topguy);
 			}
@@ -385,7 +383,10 @@ where
 
 	fn mutate(&self, indiv: Self::G) -> Self::G {
 		let mut ctx = self.ctx.borrow_mut();
-		self.mutator.mutate(&mut *ctx, indiv)
+		self.mutators
+			.choose(ctx.rng())
+			.expect("non-empty mutators")
+			.mutate(&mut *ctx, indiv)
 	}
 
 	fn select(&self) -> HashSet<usize> {
@@ -400,163 +401,5 @@ where
 	fn crossover(&self, par_a: &Self::G, par_b: &Self::G) -> Self::G {
 		let mut ctx = self.ctx.borrow_mut();
 		par_a.reproduce(par_b, &mut *ctx)
-	}
-}
-
-pub struct WasmGenAlgBuilder<P, M, S>
-where
-	P: Problem,
-	M: Mutator<WasmGenome, Context>,
-	S: Selector<WasmGenome, Context>,
-{
-	problem: Option<P>,
-	pop_size: Option<usize>,
-	selection: Option<S>,
-	enable_elitism: Option<bool>,
-	elitism_rate: Option<f64>,
-	enable_crossover: Option<bool>,
-	enable_speciation: Option<bool>,
-	crossover_rate: Option<f64>,
-	// crossover: Option<C>
-	mutation_rate: Option<f64>,
-	mutation: Option<M>,
-	starter: Option<WasmGenome>,
-	stop_cond: Option<Box<dyn Predicate<WasmGenome, Context>>>,
-	generations: Option<usize>,
-	seed: Option<u64>,
-	log_file: Option<String>,
-}
-
-impl<P, M, S> WasmGenAlgBuilder<P, M, S>
-where
-	P: Problem + Sync,
-	M: Mutator<WasmGenome, Context>,
-	S: Selector<WasmGenome, Context>,
-	P::In: WasmParams,
-	P::Out: WasmResults,
-{
-	pub fn build(self) -> WasmGenAlg<P, M, S> {
-		let selection = self.selection.unwrap();
-		let mutation = self.mutation.unwrap();
-		let problem = self.problem.unwrap();
-		let stop_cond = self
-			.stop_cond
-			.unwrap_or_else(|| Box::new(|_: &mut Context, _: &[WasmGenome]| true)); // optional
-		let init_genome = self.starter.unwrap();
-
-		let params = GenAlgParams {
-			// TODO assert crossover_rate + elitism_rate <= 1.0
-			pop_size: self.pop_size.unwrap(),
-
-			elitism_rate: self.elitism_rate.unwrap_or_default(), // optional, default 0.0
-			enable_speciation: self.enable_speciation.unwrap_or_default(), // optional, default false
-			crossover_rate: self.crossover_rate.unwrap_or_default(), // optional, default 0.0
-			mutation_rate: self.mutation_rate.unwrap(),          // TODO: use mutation rate
-			num_generations: self.generations.unwrap(),
-			seed: self.seed,
-			log_file: self.log_file,
-		};
-
-		WasmGenAlg::new(params, problem, mutation, selection, init_genome, stop_cond)
-	}
-
-	pub fn problem(mut self, problem: P) -> Self {
-		self.problem = Some(problem);
-		self
-	}
-
-	pub fn pop_size(mut self, size: usize) -> Self {
-		self.pop_size = Some(size);
-		self
-	}
-
-	pub fn selection(mut self, sel: S) -> Self {
-		self.selection = Some(sel);
-		self
-	}
-
-	pub fn enable_elitism(mut self, en: bool) -> Self {
-		self.enable_elitism = Some(en);
-		self
-	}
-
-	pub fn elitism_rate(mut self, rate: f64) -> Self {
-		assert!((0.0..=1.0).contains(&rate), "rate must be in [0, 1]");
-		self.elitism_rate = Some(rate);
-		self
-	}
-
-	pub fn enable_crossover(mut self, en: bool) -> Self {
-		self.enable_crossover = Some(en);
-		self
-	}
-
-	pub fn enable_speciation(mut self, en: bool) -> Self {
-		self.enable_speciation = Some(en);
-		self
-	}
-
-	pub fn crossover_rate(mut self, rate: f64) -> Self {
-		assert!((0.0..=1.0).contains(&rate), "rate must be in [0, 1]");
-		self.crossover_rate = Some(rate);
-		self
-	}
-
-	pub fn mutation_rate(mut self, rate: f64) -> Self {
-		assert!((0.0..=1.0).contains(&rate), "rate must be in [0, 1]");
-		self.mutation_rate = Some(rate);
-		self
-	}
-
-	pub fn mutation(mut self, mu: M) -> Self {
-		self.mutation = Some(mu);
-		self
-	}
-
-	pub fn init_genome(mut self, init: WasmGenome) -> Self {
-		self.starter = Some(init);
-		self
-	}
-
-	pub fn stop_condition(mut self, pred: Box<dyn Predicate<WasmGenome, Context>>) -> Self {
-		self.stop_cond = Some(pred);
-		self
-	}
-
-	pub fn generations(mut self, gens: usize) -> Self {
-		self.generations = Some(gens);
-		self
-	}
-
-	pub fn seed(mut self, seed: u64) -> Self {
-		self.seed = Some(seed);
-		self
-	}
-}
-
-impl<P, M, S> Default for WasmGenAlgBuilder<P, M, S>
-where
-	P: Problem,
-	M: Mutator<WasmGenome, Context>,
-	S: Selector<WasmGenome, Context>,
-{
-	fn default() -> Self {
-		Self {
-			problem: None,
-			pop_size: None,
-			selection: None,
-			enable_elitism: None,
-			elitism_rate: None,
-			enable_crossover: None,
-			enable_speciation: None,
-			crossover_rate: None,
-			mutation_rate: None,
-			mutation: None,
-			starter: None,
-			stop_cond: None,
-			generations: None,
-			seed: None,
-			log_file: None,
-		}
 	}
 }

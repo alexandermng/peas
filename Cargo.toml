@@ -5,16 +5,16 @@ edition = "2021"
 
 [dependencies]
 bon = "2.3"
-clap = { version = "4.5.17", features = ["derive"] }
+clap = { version = "4.5.20", features = ["derive"] }
 eyre = "0.6.12"
 log = "0.4.21"
 pretty_env_logger = "0.5.0"
 rand = "0.8.5"
 rand_pcg = "0.3.1"
 rayon = "1.10.0"
-serde = { version = "1.0.210", features = ["derive"] }
+serde = { version = "1.0.214", features = ["derive"] }
 toml = "0.8.19"
 # walrus = { version = "0.20.3", features = ["parallel"] }
-wasm-encoder = { version = "0.217.0", features = ["wasmparser"] }
-wasmparser = "0.217.0"
-wasmtime = "24.0.0"
+wasm-encoder = { version = "0.219.1", features = ["wasmparser"] }
+wasmparser = "0.219.1"
+wasmtime = "26.0.1"

@@ -6,6 +6,7 @@ use rand::{
 	seq::{IteratorRandom, SliceRandom},
 	Rng,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{
 	genetic::{AsContext, Genome, Selector},
@@ -14,6 +15,7 @@ use crate::{
 
 /// Tournament Selection
 /// https://en.wikipedia.org/wiki/Tournament_selection
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TournamentSelection {
 	pub rate: f64,     // selection rate determining selection pressure (in 0..1)
 	k: usize,          // tournament size

@@ -9,11 +9,42 @@ use rand::{
 	seq::SliceRandom,
 	Rng,
 };
+use serde::{Deserialize, Serialize};
 use wasm_encoder::{Encode, Instruction};
 use wasmparser::names;
 
 use crate::wasm::{Context, InnovNum, WasmGene, WasmGenome};
 use crate::{genetic::Mutator, wasm::StackValType};
+
+/// A list of all available mutations
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type")]
+pub enum WasmMutation {
+	AddBinaryOp(AddOperation),
+	ChangeRoot(ChangeRoot),
+	// Sequence(Vec<WasmMutation>),
+}
+
+impl Mutator<WasmGenome, Context> for WasmMutation {
+	fn mutate(&self, ctx: &mut Context, indiv: WasmGenome) -> WasmGenome {
+		match self {
+			WasmMutation::AddBinaryOp(add_operation) => add_operation.mutate(ctx, indiv),
+			WasmMutation::ChangeRoot(change_root) => change_root.mutate(ctx, indiv),
+		}
+	}
+}
+
+impl From<AddOperation> for WasmMutation {
+	fn from(value: AddOperation) -> Self {
+		WasmMutation::AddBinaryOp(value)
+	}
+}
+
+impl From<ChangeRoot> for WasmMutation {
+	fn from(value: ChangeRoot) -> Self {
+		WasmMutation::ChangeRoot(value)
+	}
+}
 
 /// Mutation by individual genes
 pub trait WasmMutator {
@@ -42,7 +73,7 @@ impl<M: WasmMutator> Mutator<WasmGenome, Context> for M {
 }
 
 /// Logs where a mutation happened (previous innovnum and new instruction)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MutationLog {
 	AddOp(InnovNum, Instruction<'static>), // AddOp added after gene @ InnovNum, with Op instruction
 	ChangeRoot(InnovNum, Instruction<'static>), // ChangeRoot from gene @ InnovNum, with new instruction
@@ -91,6 +122,7 @@ impl PartialEq for MutationLog {
 impl Eq for MutationLog {}
 
 /// Adds an Operation after a random gene. Neutral.
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AddOperation {
 	rate: f64,
 }
@@ -152,6 +184,7 @@ impl WasmMutator for AddOperation {
 	}
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChangeRoot {
 	rate: f64,
 }
