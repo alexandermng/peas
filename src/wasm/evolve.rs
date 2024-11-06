@@ -10,7 +10,7 @@ use std::{
 };
 
 use bon::{builder, Builder};
-use eyre::{eyre, DefaultHandler, OptionExt, Result};
+use eyre::{eyre, DefaultHandler, Error, OptionExt, Result, WrapErr};
 use rand::{
 	distributions::Uniform,
 	prelude::Distribution,
@@ -67,7 +67,7 @@ where
 	P::In: WasmParams,
 	P::Out: WasmResults,
 {
-	fn exec(&self, args: P::In) -> P::Out {
+	fn try_exec(&self, args: P::In) -> eyre::Result<P::Out> {
 		let linker = Linker::new(&self.engine);
 		let mut store = Store::new(&self.engine, ());
 		let instance = linker.instantiate(&mut store, &self.module).unwrap();
@@ -75,17 +75,8 @@ where
 			.get_typed_func::<<P as Problem>::In, <P as Problem>::Out>(&mut store, "main")
 			.unwrap();
 
-		main.call(&mut store, args).unwrap()
-	}
-}
-
-impl<P, T> Solution<P> for &T
-where
-	P: Problem,
-	T: Solution<P>,
-{
-	fn exec(&self, args: P::In) -> P::Out {
-		(**self).exec(args)
+		main.call(&mut store, args)
+			.map_err(|e| eyre!("solution failed: {e:?}"))
 	}
 }
 
@@ -206,16 +197,13 @@ where
 
 	pub fn run(&mut self) {
 		log::info!("Beginning GA trial with seed {}", self.seed);
-		self.init();
 
 		fs::create_dir(&self.params.output_dir).unwrap();
 
-		while self.epoch() {}
-	}
-
-	fn init(&mut self) {
 		self.pop
 			.extend((0..self.params.pop_size).map(|_| self.init_genome.clone()));
+
+		while self.epoch() {}
 	}
 }
 
@@ -260,22 +248,24 @@ where
 			// Test stop condition
 			if self.stop_cond.test(&mut ctx, pop) {
 				log::info!(
-					"Stop condition met, exiting. Results are in trial_{}.log/",
-					self.seed
+					"Stop condition met, exiting. Results are in {}",
+					self.params.output_dir
 				);
 				return false;
 			} else if ctx.generation >= self.params.num_generations {
 				log::info!(
-					"Completed {} generations. Results are in trial_{}.log/",
+					"Completed {} generations. Results are in {}",
 					ctx.generation,
-					self.seed
+					self.params.output_dir
 				);
 				return false;
 			}
 
 			// Update parameters for next generation
 			ctx.generation += 1;
-			self.selector.vary_params(&mut ctx, pop);
+			self.mutators
+				.iter_mut()
+				.for_each(|m| m.vary_params(&mut ctx, pop));
 			self.selector.vary_params(&mut ctx, pop);
 			// self.crossover.vary_params(&mut ctx, pop);
 

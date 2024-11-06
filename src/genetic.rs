@@ -3,6 +3,7 @@
 use std::{
 	cell::{Cell, RefCell},
 	collections::HashSet,
+	fmt::Debug,
 	marker::PhantomData,
 };
 
@@ -120,9 +121,27 @@ pub trait Problem {
 }
 
 /// A solution to a given problem.
-pub trait Solution<P: Problem>: Sync {
-	/// Works the problem given the input arguments, returning the output
-	fn exec(&self, args: P::In) -> P::Out;
+pub trait Solution<P: Problem, E: Debug = eyre::Error>: Sync {
+	/// Works the problem given the input arguments, returning the output.
+	/// If the solution is fallible, this will panic. Use `try_exec` instead.
+	fn exec(&self, args: P::In) -> P::Out {
+		self.try_exec(args).unwrap()
+	}
+
+	/// Works the problem given the input arguments, returning the output.
+	/// If the solution is fallible, returns an error.
+	fn try_exec(&self, args: P::In) -> Result<P::Out, E>;
+}
+
+impl<P, T, E> Solution<P, E> for &T
+where
+	P: Problem,
+	T: Solution<P, E>,
+	E: Debug,
+{
+	fn try_exec(&self, args: P::In) -> Result<P::Out, E> {
+		(**self).try_exec(args)
+	}
 }
 
 /// The selection operator in a Genetic Algorithm. To be called once per generation, with optional
