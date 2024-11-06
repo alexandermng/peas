@@ -126,7 +126,7 @@ fn main() {
 	let init = {
 		let params = &[StackValType::I32, StackValType::I32, StackValType::I32];
 		let result = &[StackValType::I32];
-		let mut wg = WasmGenome::new(params, result);
+		let mut wg = WasmGenome::new(0, params, result);
 		wg.genes
 			.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
 		wg

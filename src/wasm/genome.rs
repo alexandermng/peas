@@ -11,10 +11,12 @@ use std::{
 
 use eyre::{eyre, Result};
 use rand::Rng;
+use serde::Serialize;
 use wasm_encoder::{
 	CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction, Module,
 	PrimitiveValType, TypeSection, ValType,
 };
+use wasmparser::Parser;
 
 use crate::genetic::{AsContext, Genome};
 
@@ -150,25 +152,27 @@ pub(crate) enum GeneDiff {
 #[derive(Clone, Debug, Default)]
 pub struct WasmGenome {
 	pub genes: Vec<WasmGene<'static>>,
-	pub fitness: f64,
+	pub fitness: f64,      // the fitness of the resulting Agent
+	pub generation: usize, // the generation this was created (+1 from its parents)
+
 	pub params: Vec<StackValType>,
 	pub result: Vec<StackValType>,
-
 	pub(crate) locals: Vec<StackValType>, // local variable types. includes params
 }
 
 impl WasmGenome {
 	/// Create a new WasmGenome with the given signature for the main function.
-	pub fn new(params: &[StackValType], result: &[StackValType]) -> Self {
+	pub fn new(generation: usize, params: &[StackValType], result: &[StackValType]) -> Self {
 		let params = params.to_vec();
 		let result = result.to_vec();
 		let locals = params.clone();
 		WasmGenome {
 			genes: Vec::new(),
 			fitness: 0.0,
+			generation,
+
 			params,
 			result,
-
 			locals,
 		}
 	}
@@ -186,6 +190,19 @@ impl WasmGenome {
 		// 	markers: vec![],
 		// 	fitness: 0.0,
 		// })
+		let par = Parser::new(0);
+		for payload in par.parse_all(binary) {
+			use wasmparser::Payload::*;
+			match payload? {
+				CodeSectionStart { count, range, size } => {}
+				CodeSectionEntry(body) => {}
+				_ => {}
+			};
+		}
+		// TODO: 1. find export "main" and use type to determine params/result;
+		//			 2. parse locals
+		//			 3. parse code section
+
 		todo!()
 	}
 
@@ -394,6 +411,7 @@ impl Genome<Context> for WasmGenome {
 		WasmGenome {
 			genes: child,
 			fitness: 0.0,
+			generation: self.generation + 1,
 			params: par_a.params.clone(),
 			result: par_a.result.clone(),
 			locals: par_a.locals.clone(),
@@ -415,5 +433,25 @@ impl Display for WasmGenome {
 			write!(f, "{:X}", b)?;
 		}
 		f.write_str("]")
+	}
+}
+
+/// Data for logging a genome
+#[derive(Serialize, Debug, Clone)]
+pub struct WasmGenomeRecord {
+	pub generation: usize,
+	pub id: usize,
+	pub fitness: f64,
+	pub length: usize,
+}
+
+impl WasmGenomeRecord {
+	pub fn new(id: usize, genome: &WasmGenome) -> Self {
+		Self {
+			generation: genome.generation,
+			id,
+			fitness: genome.fitness,
+			length: genome.genes.len(),
+		}
 	}
 }

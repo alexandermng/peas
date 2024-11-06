@@ -42,13 +42,27 @@ where
 	pub crossover_rate: f64,
 	pub enable_speciation: bool,
 
-	#[serde(skip)]
-	pub output_dir: String, // enclosing output directory, containing this config and other logs
+	/// Enclosing output directory, containing this config (serialized as `config.toml`) and
+	/// other logs.
+	#[serde(skip_serializing, default)]
+	pub output_dir: String,
+
+	/// Name of csv file storing genome records. Defaults to `data.csv`. Will be found inside
+	/// the output directory
+	#[serde(default = "GenAlgParams::default_datafile")]
+	#[builder(default = GenAlgParams::default_datafile())]
+	pub datafile: String,
 
 	#[doc(hidden)]
 	#[serde(skip)]
 	#[builder(skip)]
 	_ctx: PhantomData<C>,
+}
+
+impl GenAlgParams {
+	fn default_datafile() -> String {
+		"data.csv".into()
+	}
 }
 
 /// Input options to set the parameters. Can be read from a config file.

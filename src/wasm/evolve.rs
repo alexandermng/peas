@@ -10,6 +10,7 @@ use std::{
 };
 
 use bon::{builder, Builder};
+use csv::Writer;
 use eyre::{eyre, DefaultHandler, Error, OptionExt, Result, WrapErr};
 use rand::{
 	distributions::Uniform,
@@ -19,7 +20,7 @@ use rand::{
 };
 use rand_pcg::Pcg64Mcg;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use wasm_encoder::{Instruction, ValType};
 use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
 
@@ -37,7 +38,10 @@ use crate::{
 	wasm::GeneDiff,
 };
 
-use super::mutations::{MutationLog, WasmMutation};
+use super::{
+	mutations::{MutationLog, WasmMutation},
+	WasmGenomeRecord,
+};
 
 /// Assembled phenotype of an individual in a genetic algorithm. Used as a solution to a problem.
 #[derive(Clone)]
@@ -156,13 +160,14 @@ where
 	engine: Engine,
 	ctx: RefCell<Context>,
 	pop: Vec<WasmGenome>, // population of genomes
+	records: Vec<WasmGenomeRecord>,
 }
 
 impl<P, M, S> WasmGenAlg<P, M, S>
 where
 	P: Problem + Sync,
-	M: Mutator<WasmGenome, Context> + Clone,
-	S: Selector<WasmGenome, Context> + Clone,
+	M: Mutator<WasmGenome, Context> + Clone + for<'m> Deserialize<'m> + Serialize,
+	S: Selector<WasmGenome, Context> + Clone + for<'s> Deserialize<'s> + Serialize,
 	P::In: WasmParams,
 	P::Out: WasmResults,
 {
@@ -192,6 +197,7 @@ where
 			engine: Engine::default(),
 			ctx: RefCell::new(Context::new(seed)),
 			pop: Vec::with_capacity(size),
+			records: Vec::new(),
 		}
 	}
 
@@ -204,6 +210,19 @@ where
 			.extend((0..self.params.pop_size).map(|_| self.init_genome.clone()));
 
 		while self.epoch() {}
+
+		// config.toml
+		let configfile = format!("{}/config.toml", self.params.output_dir);
+		let config = toml::to_string(&self.params).expect("params should serialize");
+		fs::write(configfile, config);
+
+		// data.csv
+		let csvfile = format!("{}/{}", self.params.output_dir, self.params.datafile);
+		let mut wtr = Writer::from_path(csvfile).unwrap();
+		for rec in &self.records {
+			wtr.serialize(rec);
+		}
+		wtr.flush().unwrap();
 	}
 }
 
@@ -233,11 +252,17 @@ where
 			ctx.max_fitness = pop[0].fitness;
 			ctx.avg_fitness = pop.iter().map(WasmGenome::fitness).sum::<f64>() / (pop.len() as f64);
 
+			// Records
+			for (i, p) in pop.iter().enumerate() {
+				let id = ctx.generation * self.params.pop_size + i; // TODO move id into genome itself; assign at reproduction-time
+				self.records.push(WasmGenomeRecord::new(id, p));
+			}
+
 			// Logging
 			{
 				log::info!("Average Fitness: {}", ctx.avg_fitness);
 				log::info!("Top 10:");
-				for p in self.pop.iter().take(10) {
+				for p in pop.iter().take(10) {
 					log::info!("\t{} <-- {}", p.fitness, p);
 				}
 				let filename = format!("{}/gen_{}.wasm", self.params.output_dir, ctx.generation);
@@ -248,13 +273,13 @@ where
 			// Test stop condition
 			if self.stop_cond.test(&mut ctx, pop) {
 				log::info!(
-					"Stop condition met, exiting. Results are in {}",
+					"Stop condition met, exiting. Results are in ./{}",
 					self.params.output_dir
 				);
 				return false;
 			} else if ctx.generation >= self.params.num_generations {
 				log::info!(
-					"Completed {} generations. Results are in {}",
+					"Completed {} generations. Results are in ./{}",
 					ctx.generation,
 					self.params.output_dir
 				);
