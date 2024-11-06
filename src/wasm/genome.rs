@@ -230,7 +230,7 @@ impl WasmGenome {
 		let mut modu = Module::new();
 		let types = {
 			let mut ts = TypeSection::new();
-			ts.function(
+			ts.ty().function(
 				self.params.iter().map(|&v| v.into()),
 				self.result.iter().map(|&v| v.into()),
 			);
