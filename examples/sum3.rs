@@ -2,6 +2,14 @@
 //! Evolve code that sums 3 inputs
 //!
 
+use std::{
+	collections::HashMap,
+	fs::File,
+	io::{BufReader, Write},
+};
+
+use derive_more::derive::Display;
+use eyre::Result;
 use peas::{
 	genetic::{Problem, Solution},
 	params::GenAlgParams,
@@ -18,6 +26,8 @@ use rand::{
 use wasm_encoder::Instruction;
 // use rayon::prelude::*;
 
+#[derive(Display)]
+#[display("sum3")]
 struct Sum3 {
 	tests: Vec<((i32, i32, i32), i32)>, // input-output pairs
 }
@@ -114,7 +124,7 @@ impl Problem for Sum3 {
 // 	}
 // }
 
-fn main() {
+fn main() -> Result<()> {
 	pretty_env_logger::init();
 
 	let prob = Sum3::new(1000);
@@ -143,8 +153,28 @@ fn main() {
 		.elitism_rate(0.05)
 		.crossover_rate(0.95)
 		.enable_speciation(false)
-		.output_dir(format!("trial_{seed}.log"))
+		.output_dir(format!("data/trial_{seed}.log"))
 		.build();
 	let mut ga = WasmGenAlg::new(params, prob);
 	ga.run();
+
+	// TODO move
+	{
+		// record to manifest
+		let manifest_filename = "data/manifest.json";
+		let mut manifest: HashMap<String, Vec<String>> = match File::open(manifest_filename) {
+			Ok(f) => serde_json::from_reader(BufReader::new(f))?,
+			Err(_) => HashMap::new(), // no such file
+		};
+
+		// ga.params.output_dir
+		let files = manifest.entry(ga.problem.to_string()).or_default();
+		files.push(ga.params.output_dir);
+
+		let mut f = File::create(manifest_filename)?;
+		let buf = serde_json::to_vec(&manifest)?;
+		f.write_all(&buf)?;
+	}
+
+	Ok(())
 }
