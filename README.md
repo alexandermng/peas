@@ -11,6 +11,10 @@ Research into Program Synthesis based on NEAT.
 
 For each example problem, we define `OurProblem` and implement it as a `Problem`. The WasmGA does the rest.
 
+## Running Scripts
+
+We use Python for data visualization. Scripts are held in `./scripts`, with the environment managed by [uv](https://docs.astral.sh/uv/).
+
 ## TODO
 
 - [AN] dist for speciation

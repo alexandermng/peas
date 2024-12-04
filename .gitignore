@@ -7,3 +7,6 @@
 
 # Trial Logs
 trial_*/
+
+# Python
+.venv/
