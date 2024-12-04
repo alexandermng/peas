@@ -57,7 +57,7 @@ where
 	#[builder(default = GenAlgParams::default_datafile())]
 	pub datafile: String,
 
-	/// Name of text file storing results. Defaults to `results.txt`. Will be found inside the
+	/// Name of json file storing results. Defaults to `results.json`. Will be found inside the
 	/// output directory.
 	#[serde(default = "GenAlgParams::default_resultsfile")]
 	#[builder(default = GenAlgParams::default_resultsfile())]
@@ -75,7 +75,7 @@ impl GenAlgParams {
 	}
 
 	fn default_resultsfile() -> String {
-		"results.txt".into()
+		"results.json".into()
 	}
 }
 

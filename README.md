@@ -15,8 +15,7 @@ For each example problem, we define `OurProblem` and implement it as a `Problem`
 
 - [AN] dist for speciation
 - [SSE] speciation
-- [SSE] logging
-- impl Serialize for WasmGenome, for logging (?)
+- [AN] results logging
 - [AN] dynamic validity in mutations (e.g. how to get div working?) OR catch to send negative fitness
 - [AN] rework Solutions for RL / simulation-based fitness w/ timesteps
 - consider caching things

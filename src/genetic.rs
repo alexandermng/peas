@@ -8,6 +8,7 @@ use std::{
 };
 
 use rand::Rng;
+use serde::Serialize;
 
 /// Represents a genetic algorithm, which must implement these genetic operators, for a given Genome type.
 /// It holds parameters for these operators and keeps track of its current population through generations.
@@ -107,12 +108,50 @@ pub trait AsContext {
 // 	}
 // }
 
+/// Aggregates any results from the run. Define hooks to record data.
+pub trait Results: Serialize {
+	type G: Genome<Self::C>;
+	type C: AsContext;
+
+	/// Called once every generation, after evaluation and before crafting of next generation.
+	fn record_generation(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {}
+
+	/// Called upon the algorithm hitting its stop condition. Not called when algorithm completes specified generations.
+	fn record_success(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {}
+
+	/// Finalize results. This happens before serialization to a file. Any adjacent files should be written here.
+	fn finalize(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {}
+}
+
+// /// Default impl for Results. See trait-level docs.
+// #[derive(Default, Debug, Serialize, Clone)]
+// pub struct DefaultResults<G> {
+// 	success: bool, // whether it found a solution
+// 	num_generations: usize, // how many generations it ran for
+// 	max_fitnesses: Vec<u64>, // top fitness for each generation
+// 	avg_fitnesses: Vec<u64>, // mean fitness for each generation
+// }
+
+// impl<G> Results<G> for DefaultResults<G> {
+// 	fn record_generation(&mut self, alg: &mut G) {
+// 			// TODO need alg to expose population
+// 	}
+
+// 	fn record_success(&mut self, alg: &mut G) {
+// 			self.success = true;
+// 	}
+
+// 	fn finalize(&mut self, alg: &mut G) {
+// 			self.num_generations = 0; // TODO need alg to expose params
+// 	}
+// }
+
 /// Represents a task or problem to be solved by a genetic algorithm's individual/agent. Should contain
 /// problem parameters and necessary training data for evaluation.
 pub trait Problem {
 	type In; // type of inputs/arguments to the Agent (e.g. (i32, i32) )
 	type Out; // type of outputs/results from the Agent (e.g. i32 )
-		  // can add stuff like externals later
+		   // can add stuff like externals later
 
 	/// Calculates a Solution's fitness, defined per-problem
 	fn fitness(&self, soln: impl Solution<Self>) -> f64

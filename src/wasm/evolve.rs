@@ -5,6 +5,7 @@ use std::{
 	collections::{HashMap, HashSet},
 	fs,
 	hash::{DefaultHasher, Hash, Hasher},
+	marker::PhantomData,
 	mem,
 	ops::Range,
 };
@@ -25,17 +26,17 @@ use wasm_encoder::{Instruction, ValType};
 use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
 
 use crate::{
-	genetic::AsContext,
+	genetic::{self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Problem, Selector, Solution},
+	wasm::GeneDiff,
+};
+use crate::{
+	genetic::{AsContext, Results},
 	params::{GenAlgParams, GenAlgParamsOpts},
 	selection::TournamentSelection,
 	wasm::{
 		genome::{InnovNum, StackValType, WasmGene, WasmGenome},
 		mutations::AddOperation,
 	},
-};
-use crate::{
-	genetic::{self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Problem, Selector, Solution},
-	wasm::GeneDiff,
 };
 
 use super::{
@@ -135,6 +136,30 @@ impl AsContext for Context {
 	}
 }
 
+#[derive(Default, Debug, Serialize, Clone)]
+pub struct WasmGenAlgResults {
+	pub success: bool,           // whether it found a solution
+	pub num_generations: usize,  // how many generations it ran for
+	pub max_fitnesses: Vec<f64>, // top fitness for each generation
+	pub avg_fitnesses: Vec<f64>, // mean fitness for each generation
+}
+
+impl Results for WasmGenAlgResults {
+	type C = Context;
+	type G = WasmGenome;
+
+	fn record_generation(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {
+		self.max_fitnesses.push(ctx.max_fitness);
+		self.avg_fitnesses.push(ctx.avg_fitness);
+	}
+	fn record_success(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {
+		self.success = true;
+	}
+	fn finalize(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {
+		self.num_generations = ctx.generation;
+	}
+}
+
 type WasmGenAlgParams<M, S> = GenAlgParams<WasmGenome, Context, M, S>;
 
 /// A genetic algorithm for synthesizing WebAssembly modules to solve a problem. The problem must specify
@@ -148,6 +173,7 @@ where
 	// Parameters
 	pub problem: P,
 	pub params: WasmGenAlgParams<M, S>,
+	pub results: WasmGenAlgResults, // TODO later make generic over any R
 
 	mutators: Vec<M>,                                   // copied from params
 	selector: S,                                        // copied from params
@@ -158,9 +184,9 @@ where
 
 	// Runtime use
 	engine: Engine,
-	ctx: RefCell<Context>,
-	pop: Vec<WasmGenome>, // population of genomes
-	records: Vec<WasmGenomeRecord>,
+	ctx: RefCell<Context>,          // runtime context
+	pop: Vec<WasmGenome>,           // population of genomes
+	records: Vec<WasmGenomeRecord>, // TODO move to results
 }
 
 impl<P, M, S> WasmGenAlg<P, M, S>
@@ -173,7 +199,7 @@ where
 {
 	pub fn new(params: WasmGenAlgParams<M, S>, problem: P) -> Self {
 		let size = params.pop_size;
-		let seed = params.seed;
+		let seed: u64 = params.seed.into();
 		let mutators = params.mutators.clone();
 		let selector = params.selector.clone();
 		let init_genome = params.init_genome.clone();
@@ -186,6 +212,7 @@ where
 		WasmGenAlg {
 			problem,
 			params,
+			results: Default::default(), // TODO pass in results, return results
 
 			mutators,
 			selector,
@@ -223,6 +250,13 @@ where
 			wtr.serialize(rec);
 		}
 		wtr.flush().unwrap();
+
+		// results.txt
+		let mut ctx = self.ctx.borrow_mut();
+		self.results.finalize(&mut ctx, &self.pop);
+		let resultsfile = format!("{}/{}", self.params.output_dir, self.params.resultsfile);
+		let results = serde_json::to_string(&self.results).expect("results should serialize");
+		fs::write(resultsfile, results);
 	}
 }
 
@@ -285,6 +319,8 @@ where
 				);
 				return false;
 			}
+
+			self.results.record_generation(&mut ctx, pop);
 
 			// Update parameters for next generation
 			ctx.generation += 1;
