@@ -1,7 +1,9 @@
 use bon::{builder, Builder};
+use derive_more::derive::{From, Into};
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize, Serializer};
 use std::path::Path;
+use std::str::FromStr;
 use std::{fs, marker::PhantomData};
 use toml;
 
@@ -25,7 +27,9 @@ where
 	M: Mutator<G, C>,
 	S: Selector<G, C>,
 {
-	pub seed: u64, // set seed for the run
+	#[builder(into)]
+	pub seed: SeedString, // set seed for the run, can convert into u64
+
 	pub pop_size: usize,
 	pub num_generations: usize,
 	pub max_fitness: Option<f64>,
@@ -48,10 +52,16 @@ where
 	pub output_dir: String,
 
 	/// Name of csv file storing genome records. Defaults to `data.csv`. Will be found inside
-	/// the output directory
+	/// the output directory.
 	#[serde(default = "GenAlgParams::default_datafile")]
 	#[builder(default = GenAlgParams::default_datafile())]
 	pub datafile: String,
+
+	/// Name of text file storing results. Defaults to `results.txt`. Will be found inside the
+	/// output directory.
+	#[serde(default = "GenAlgParams::default_resultsfile")]
+	#[builder(default = GenAlgParams::default_resultsfile())]
+	pub resultsfile: String,
 
 	#[doc(hidden)]
 	#[serde(skip)]
@@ -62,6 +72,37 @@ where
 impl GenAlgParams {
 	fn default_datafile() -> String {
 		"data.csv".into()
+	}
+
+	fn default_resultsfile() -> String {
+		"results.txt".into()
+	}
+}
+
+/// Utility for (de)serializing a u64 seed to/from a string.
+#[derive(Debug, From, Into, Clone, Copy)]
+pub struct SeedString(u64);
+
+// TODO: ^ impl FromStr
+
+impl Serialize for SeedString {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		let s = self.0.to_string();
+		serializer.serialize_str(&s)
+	}
+}
+impl<'de> Deserialize<'de> for SeedString {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		// TODO some way of string to int
+		let s: &str = Deserialize::deserialize(deserializer)?;
+		let i: u64 = s.parse().map_err(serde::de::Error::custom)?;
+		Ok(Self(i))
 	}
 }
 
