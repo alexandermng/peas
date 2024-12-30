@@ -29,6 +29,8 @@ pub struct Sum3 {
 
 impl Sum3 {
 	pub fn new(num: usize, partial1_rate: f64, partial2_rate: f64) -> Self {
+		// const partial1_rate: f64 = 0.1; // TODO find a way to default these
+		// const partial2_rate: f64 = 0.2;
 		let mut tests = Vec::with_capacity(num);
 		let partial1_tests_num = (num as f64 * partial1_rate) as usize;
 		let partial2_tests_num = (num as f64 * partial2_rate) as usize;

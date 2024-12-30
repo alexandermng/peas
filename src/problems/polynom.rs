@@ -1,13 +1,21 @@
+use derive_more::derive::Display;
 use rand::{
 	distributions::{Distribution, Uniform},
 	thread_rng, Rng,
 };
+use serde::{Deserialize, Deserializer, Serialize};
 use wasm_encoder::Instruction;
 
 use crate::problems::{Problem, Solution};
 // use rayon::prelude::*;
 
+#[derive(Serialize, Display, Debug, Clone)]
+#[display("polynomial")]
 pub struct Polynom<const N: usize = 2> {
+	pub num_tests: usize,
+	pub partial1_tests_rate: f64,
+
+	#[serde(skip)]
 	tests: Vec<([i32; N], i32)>, // input-output pairs
 }
 
@@ -17,10 +25,10 @@ impl Polynom<2> {
 		(x * x) + (x * y) + (y * y)
 	}
 
-	pub fn new(num: usize) -> Self {
-		const PARTIAL1_TESTS_RATE: f64 = 0.3;
+	pub fn new(num: usize, partial1_rate: f64) -> Self {
+		// const partial1_rate: f64 = 0.3;
 		let mut tests = Vec::with_capacity(num);
-		let partial1_tests_num = (num as f64 * PARTIAL1_TESTS_RATE) as usize;
+		let partial1_tests_num = (num as f64 * partial1_rate) as usize;
 		let dist = Uniform::new(-256, 256);
 		let rng = &mut thread_rng();
 
@@ -46,7 +54,11 @@ impl Polynom<2> {
 				.map(|i| (i, Self::expr(i[0], i[1]))),
 		);
 
-		Self { tests }
+		Self {
+			num_tests: num,
+			partial1_tests_rate: partial1_rate,
+			tests,
+		}
 	}
 }
 
@@ -67,5 +79,24 @@ impl Problem for Polynom<2> {
 			})
 			.sum();
 		passed / (self.tests.len() as f64)
+	}
+}
+
+impl<'de> Deserialize<'de> for Polynom<2> {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		#[derive(Deserialize)]
+		struct Polynom2Params {
+			num_tests: usize,
+			partial1_tests_rate: f64,
+		}
+
+		let params = Polynom2Params::deserialize(deserializer)?;
+		Ok(Polynom::<2>::new(
+			params.num_tests,
+			params.partial1_tests_rate,
+		))
 	}
 }
