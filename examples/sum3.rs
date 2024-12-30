@@ -15,7 +15,7 @@ use peas::{
 	params::GenAlgParams,
 	selection::TournamentSelection,
 	wasm::{
-		mutations::{AddOperation, ChangeRoot, WasmMutation},
+		mutations::{AddOperation, ChangeRoot, WasmMutationSet},
 		InnovNum, StackValType, WasmGenAlg, WasmGene, WasmGenome,
 	},
 };
@@ -129,7 +129,7 @@ fn main() -> Result<()> {
 
 	let prob = Sum3::new(1000);
 	let seed: u64 = thread_rng().gen();
-	let muts: Vec<WasmMutation> = vec![
+	let muts: Vec<WasmMutationSet> = vec![
 		AddOperation::from_rate(0.2).into(), // local variable
 		ChangeRoot::from_rate(0.3).into(),   // consts, locals, push onto stack
 	];

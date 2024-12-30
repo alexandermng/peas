@@ -2,27 +2,20 @@
 //! Evolve code that sums 4 inputs
 //!
 
-use peas::{
-	genetic::{Problem, Solution},
-	params::GenAlgParams,
-	selection::TournamentSelection,
-	wasm::{
-		mutations::{AddOperation, ChangeRoot, WasmMutationSet},
-		InnovNum, StackValType, WasmGenAlg, WasmGene, WasmGenome,
-	},
-};
 use rand::{
 	distributions::{Distribution, Uniform},
 	thread_rng, Rng,
 };
 use wasm_encoder::Instruction;
+
+use crate::problems::{Problem, Solution};
 // use rayon::prelude::*;
 
-struct Sum3 {
+pub struct Sum4 {
 	tests: Vec<((i32, i32, i32, i32), i32)>, // input-output pairs
 }
 
-impl Sum3 {
+impl Sum4 {
 	pub fn new(num: usize) -> Self {
 		const PARTIAL1_TESTS_RATE: f64 = 0.02;
 		const PARTIAL2_TESTS_RATE: f64 = 0.04;
@@ -88,11 +81,11 @@ impl Sum3 {
 	}
 }
 
-impl Problem for Sum3 {
+impl Problem for Sum4 {
 	type In = (i32, i32, i32, i32);
 	type Out = i32;
 
-	fn fitness(&self, soln: impl Solution<Sum3>) -> f64 {
+	fn fitness(&self, soln: impl Solution<Sum4>) -> f64 {
 		let passed: f64 = self
 			.tests
 			// .par_iter()
@@ -101,57 +94,4 @@ impl Problem for Sum3 {
 			.sum();
 		passed / (self.tests.len() as f64)
 	}
-}
-
-// impl Solution<Sum3> for Agent {
-// 	fn exec(&self, input: (i32, i32, i32)) -> i32 {
-// 		let linker = Linker::new(&self.engine);
-// 		let mut store = Store::new(&self.engine, ());
-// 		let instance = linker.instantiate(&mut store, &self.module).unwrap();
-// 		let main = instance
-// 			.get_typed_func::<<Sum3 as Problem>::In, <Sum3 as Problem>::Out>(&mut store, "main")
-// 			.unwrap();
-
-// 		main.call(&mut store, input).unwrap()
-// 	}
-// }
-
-fn main() {
-	pretty_env_logger::init();
-
-	let prob = Sum3::new(1000);
-	let seed: u64 = thread_rng().gen();
-	let muts: Vec<WasmMutationSet> = vec![
-		AddOperation::from_rate(0.2).into(), // local variable
-		ChangeRoot::from_rate(0.3).into(),   // consts, locals, push onto stack
-	];
-	let init = {
-		let params = &[
-			StackValType::I32,
-			StackValType::I32,
-			StackValType::I32,
-			StackValType::I32,
-		];
-		let result = &[StackValType::I32];
-		let mut wg = WasmGenome::new(0, params, result);
-		wg.genes
-			.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
-		wg
-	};
-	let params = GenAlgParams::builder()
-		.seed(seed)
-		.pop_size(100)
-		.num_generations(100)
-		.max_fitness(1.0)
-		.mutators(muts)
-		.mutation_rate(1.0)
-		.selector(TournamentSelection::new(0.6, 3, 0.9, false)) // can do real tournament selection when selection is fixed
-		.init_genome(init)
-		.elitism_rate(0.05)
-		.crossover_rate(0.95)
-		.enable_speciation(false)
-		.output_dir(format!("trial_{seed}.log"))
-		.build();
-	let mut ga = WasmGenAlg::new(params, prob);
-	ga.run();
 }

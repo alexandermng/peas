@@ -26,12 +26,14 @@ use wasm_encoder::{Instruction, ValType};
 use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
 
 use crate::{
-	genetic::{self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Problem, Selector, Solution},
+	genetic::{self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Selector},
+	params,
+	problems::{Problem, ProblemSet, Solution, Sum3},
 	wasm::GeneDiff,
 };
 use crate::{
 	genetic::{AsContext, Results},
-	params::{GenAlgParams, GenAlgParamsOpts},
+	params::{GenAlgConfig, GenAlgParams},
 	selection::TournamentSelection,
 	wasm::{
 		genome::{InnovNum, StackValType, WasmGene, WasmGenome},
@@ -40,7 +42,7 @@ use crate::{
 };
 
 use super::{
-	mutations::{MutationLog, WasmMutation},
+	mutations::{MutationLog, WasmMutationSet},
 	WasmGenomeRecord,
 };
 
@@ -160,11 +162,13 @@ impl Results for WasmGenAlgResults {
 	}
 }
 
-type WasmGenAlgParams<M, S> = GenAlgParams<WasmGenome, Context, M, S>;
+pub type WasmGenAlgConfig<M, S> =
+	GenAlgConfig<WasmGenome, Context, ProblemSet, WasmGenAlgResults, M, S>;
+pub type WasmGenAlgParams<M, S> = GenAlgParams<WasmGenome, Context, M, S>;
 
 /// A genetic algorithm for synthesizing WebAssembly modules to solve a problem. The problem must specify
 /// a fitness function. Parametrized across the problem, the mutation type, and the selection type.
-pub struct WasmGenAlg<P, M, S>
+pub struct WasmGenAlg<P, M = WasmMutationSet, S = TournamentSelection>
 where
 	P: Problem,
 	M: Mutator<WasmGenome, Context>,
@@ -180,7 +184,10 @@ where
 	init_genome: WasmGenome,                            // copied from params
 	stop_cond: Box<dyn Predicate<WasmGenome, Context>>, // TODO... idk fix
 
-	seed: u64, // copied from params
+	seed: u64,           // copied from params
+	outdir: String,      // copied from config, or default
+	datafile: String,    // copied from config, or default
+	resultsfile: String, // copied from config, or default
 
 	// Runtime use
 	engine: Engine,
@@ -191,13 +198,38 @@ where
 
 impl<P, M, S> WasmGenAlg<P, M, S>
 where
+	P: Problem,
+	M: Mutator<WasmGenome, Context> + Clone + for<'m> Deserialize<'m> + Serialize + 'static,
+	S: Selector<WasmGenome, Context> + Clone + for<'s> Deserialize<'s> + Serialize + 'static,
+{
+	pub fn from_config(
+		config: WasmGenAlgConfig<M, S>,
+	) -> Box<dyn GenAlg<G = WasmGenome, C = Context>> {
+		let WasmGenAlgConfig {
+			problem,
+			params,
+			results,
+			output_dir,
+			datafile,
+			resultsfile,
+		} = config;
+
+		match problem {
+			ProblemSet::Sum3(p) => Box::new(WasmGenAlg::new(p, params, results)),
+			ProblemSet::Sum4(p) => Box::new(WasmGenAlg::new(p, params, results)),
+		}
+	}
+}
+
+impl<P, M, S> WasmGenAlg<P, M, S>
+where
 	P: Problem + Sync,
 	M: Mutator<WasmGenome, Context> + Clone + for<'m> Deserialize<'m> + Serialize,
 	S: Selector<WasmGenome, Context> + Clone + for<'s> Deserialize<'s> + Serialize,
 	P::In: WasmParams,
 	P::Out: WasmResults,
 {
-	pub fn new(params: WasmGenAlgParams<M, S>, problem: P) -> Self {
+	pub fn new(problem: P, params: WasmGenAlgParams<M, S>, results: WasmGenAlgResults) -> Self {
 		let size = params.pop_size;
 		let seed: u64 = params.seed.into();
 		let mutators = params.mutators.clone();
@@ -209,16 +241,23 @@ where
 			}),
 			None => Box::new(|_: &mut Context, _: &[WasmGenome]| false),
 		};
+		let outdir = format!("trial_{seed}.log");
+		let datafile = params::default_datafile();
+		let resultsfile = params::default_resultsfile();
+
 		WasmGenAlg {
 			problem,
 			params,
-			results: Default::default(), // TODO pass in results, return results
+			results,
 
 			mutators,
 			selector,
 			init_genome,
 			stop_cond,
 			seed,
+			outdir,
+			datafile,
+			resultsfile,
 
 			// Runtime use
 			engine: Engine::default(),
@@ -227,8 +266,20 @@ where
 			records: Vec::new(),
 		}
 	}
+}
 
-	pub fn run(&mut self) {
+impl<P, M, S> GenAlg for WasmGenAlg<P, M, S>
+where
+	P: Problem + Sync,
+	M: Mutator<WasmGenome, Context>,
+	S: Selector<WasmGenome, Context>,
+	P::In: WasmParams,
+	P::Out: WasmResults,
+{
+	type G = WasmGenome;
+	type C = Context;
+
+	fn run(&mut self) {
 		log::info!("Beginning GA trial with seed {}", self.seed);
 
 		fs::create_dir(&self.params.output_dir).unwrap();
@@ -258,18 +309,6 @@ where
 		let results = serde_json::to_string(&self.results).expect("results should serialize");
 		fs::write(resultsfile, results);
 	}
-}
-
-impl<P, M, S> GenAlg for WasmGenAlg<P, M, S>
-where
-	P: Problem + Sync,
-	M: Mutator<WasmGenome, Context>,
-	S: Selector<WasmGenome, Context>,
-	P::In: WasmParams,
-	P::Out: WasmResults,
-{
-	type G = WasmGenome;
-	type C = Context;
 
 	fn epoch(&mut self) -> bool {
 		log::info!("Evaluating generation {}.", self.ctx.borrow().generation);

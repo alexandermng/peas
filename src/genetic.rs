@@ -16,6 +16,10 @@ pub trait GenAlg {
 	type G: Genome<Self::C>;
 	type C: AsContext;
 
+	fn run(&mut self);
+
+	// fn reset(&mut self);
+
 	/// Executes an epoch/generation by performing:
 	/// 1. Evaluation/Simulation, calculating fitnesses
 	/// 2. Selection
@@ -145,43 +149,6 @@ pub trait Results: Serialize {
 // 			self.num_generations = 0; // TODO need alg to expose params
 // 	}
 // }
-
-/// Represents a task or problem to be solved by a genetic algorithm's individual/agent. Should contain
-/// problem parameters and necessary training data for evaluation.
-pub trait Problem {
-	type In; // type of inputs/arguments to the Agent (e.g. (i32, i32) )
-	type Out; // type of outputs/results from the Agent (e.g. i32 )
-		   // can add stuff like externals later
-
-	/// Calculates a Solution's fitness, defined per-problem
-	fn fitness(&self, soln: impl Solution<Self>) -> f64
-	where
-		Self: Sized; // no "dyn Problem"s
-}
-
-/// A solution to a given problem.
-pub trait Solution<P: Problem, E: Debug = eyre::Error>: Sync {
-	/// Works the problem given the input arguments, returning the output.
-	/// If the solution is fallible, this will panic. Use `try_exec` instead.
-	fn exec(&self, args: P::In) -> P::Out {
-		self.try_exec(args).unwrap()
-	}
-
-	/// Works the problem given the input arguments, returning the output.
-	/// If the solution is fallible, returns an error.
-	fn try_exec(&self, args: P::In) -> Result<P::Out, E>;
-}
-
-impl<P, T, E> Solution<P, E> for &T
-where
-	P: Problem,
-	T: Solution<P, E>,
-	E: Debug,
-{
-	fn try_exec(&self, args: P::In) -> Result<P::Out, E> {
-		(**self).try_exec(args)
-	}
-}
 
 /// The selection operator in a Genetic Algorithm. To be called once per generation, with optional
 /// parameter variation after evaluation each generation.
