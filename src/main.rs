@@ -6,7 +6,7 @@ use peas::{
 	genetic::{Configurable, GenAlg},
 	params::GenAlgParams,
 	prelude::*,
-	problems::Sum3,
+	problems::{Polynom, ProblemSet, Sum3, Sum4},
 	selection::TournamentSelection,
 	wasm::{
 		mutations::{AddOperation, ChangeRoot, WasmMutationSet},
@@ -56,8 +56,29 @@ fn main() -> eyre::Result<()> {
 
 	let problem = args.problem.unwrap_or_else(|| String::from("sum3"));
 	let (problem, init) = match &*problem {
-		"sum3" => (Sum3::new(1000, 0.1, 0.2), {
+		"sum3" => (ProblemSet::Sum3(Sum3::new(1000, 0.1, 0.2)), {
 			let params = &[StackValType::I32, StackValType::I32, StackValType::I32];
+			let result = &[StackValType::I32];
+			let mut wg = WasmGenome::new(0, params, result);
+			wg.genes
+				.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
+			wg
+		}),
+		"sum4" => (ProblemSet::Sum4(Sum4::new(1000, 0.02, 0.04, 0.08)), {
+			let params = &[
+				StackValType::I32,
+				StackValType::I32,
+				StackValType::I32,
+				StackValType::I32,
+			];
+			let result = &[StackValType::I32];
+			let mut wg = WasmGenome::new(0, params, result);
+			wg.genes
+				.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
+			wg
+		}),
+		"polynom" => (ProblemSet::Polynom2(Polynom::new(1000, 0.3)), {
+			let params = &[StackValType::I32, StackValType::I32];
 			let result = &[StackValType::I32];
 			let mut wg = WasmGenome::new(0, params, result);
 			wg.genes
@@ -84,12 +105,21 @@ fn main() -> eyre::Result<()> {
 		.enable_speciation(false)
 		.build();
 	let results = WasmGenAlgResults::default();
-	// match problem {
-
-	// }
-	// TODO fix somehow... I need to box it? ffs
-	let mut ga = WasmGenAlg::new(problem, params, results);
-	ga.run();
+	match problem {
+		//.... hey. it works.
+		ProblemSet::Sum3(p) => {
+			let mut ga = WasmGenAlg::new(p, params, results);
+			ga.run();
+		}
+		ProblemSet::Sum4(p) => {
+			let mut ga = WasmGenAlg::new(p, params, results);
+			ga.run();
+		}
+		ProblemSet::Polynom2(p) => {
+			let mut ga = WasmGenAlg::new(p, params, results);
+			ga.run();
+		}
+	}
 
 	Ok(())
 }
