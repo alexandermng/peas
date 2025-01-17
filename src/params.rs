@@ -16,7 +16,7 @@ use crate::{
 };
 
 /// A full config for a genetic algorithm. Meant to be saved to a file.
-#[derive(Serialize, Deserialize, Builder)]
+#[derive(Serialize, Deserialize, Builder, Debug, Clone)]
 #[serde(bound = "
 	G: Default,
 	R: Default,
@@ -65,13 +65,13 @@ pub(crate) fn default_resultsfile() -> String {
 }
 
 /// Actual parameters for the genetic algorithm. Can be saved as an output to a file and subsequently loaded in to replicate runs.
-#[derive(Serialize, Deserialize, Builder)]
+#[derive(Serialize, Deserialize, Builder, Debug)]
 #[serde(bound = "
 	G: Default,
 	for<'m> M: Deserialize<'m> + Serialize,
 	for<'s> S: Deserialize<'s> + Serialize
 ")]
-pub struct GenAlgParams<G = WasmGenome, C = Context, M = WasmMutationSet, S = TournamentSelection>
+pub struct GenAlgParams<G, C, M, S>
 where
 	G: Genome<C>,
 	C: AsContext,
@@ -101,6 +101,31 @@ where
 	#[serde(skip)]
 	#[builder(skip)]
 	_ctx: PhantomData<C>,
+}
+
+impl<G, C, M, S> Clone for GenAlgParams<G, C, M, S>
+where
+	G: Genome<C> + Clone,
+	C: AsContext,
+	M: Mutator<G, C> + Clone,
+	S: Selector<G, C> + Clone,
+{
+	fn clone(&self) -> Self {
+		Self {
+			seed: self.seed.clone(),
+			pop_size: self.pop_size.clone(),
+			num_generations: self.num_generations.clone(),
+			max_fitness: self.max_fitness.clone(),
+			mutators: self.mutators.clone(),
+			mutation_rate: self.mutation_rate.clone(),
+			selector: self.selector.clone(),
+			init_genome: self.init_genome.clone(),
+			elitism_rate: self.elitism_rate.clone(),
+			crossover_rate: self.crossover_rate.clone(),
+			enable_speciation: self.enable_speciation.clone(),
+			_ctx: self._ctx.clone(),
+		}
+	}
 }
 
 /// Utility for (de)serializing a u64 seed to/from a string.

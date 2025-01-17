@@ -16,6 +16,7 @@ pub trait GenAlg {
 	type G: Genome<Self::C>;
 	type C: AsContext;
 
+	/// Run the full algorithm.
 	fn run(&mut self);
 
 	// fn reset(&mut self);
@@ -40,6 +41,20 @@ pub trait GenAlg {
 
 	/// Crosses over / recombines two parent individuals to generate a new child individual.
 	fn crossover(&self, a: &Self::G, b: &Self::G) -> Self::G;
+}
+pub trait ConfiguredGenAlg<C>: GenAlg + Configurable<C> {}
+impl<T, C> ConfiguredGenAlg<C> for T where T: GenAlg + Configurable<C> {}
+
+pub trait Configurable<C> {
+	type Output: GenAlg + ?Sized;
+	/// Creates the object from a config
+	fn from_config(config: C) -> Box<Self::Output>;
+
+	/// Recreates the config of the object
+	fn gen_config(&self) -> C;
+
+	/// Outputs the config to a file
+	fn log_config(&mut self);
 }
 
 /// A species in a genetic algorithm

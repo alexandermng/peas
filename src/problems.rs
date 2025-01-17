@@ -52,4 +52,23 @@ where
 pub enum ProblemSet {
 	Sum3(Sum3),
 	Sum4(Sum4),
+	Polynom2(Polynom<2>),
+}
+
+impl From<Sum3> for ProblemSet {
+	fn from(value: Sum3) -> Self {
+		ProblemSet::Sum3(value)
+	}
+}
+
+impl From<Sum4> for ProblemSet {
+	fn from(value: Sum4) -> Self {
+		ProblemSet::Sum4(value)
+	}
+}
+
+impl From<Polynom<2>> for ProblemSet {
+	fn from(value: Polynom<2>) -> Self {
+		ProblemSet::Polynom2(value)
+	}
 }

@@ -26,7 +26,10 @@ use wasm_encoder::{Instruction, ValType};
 use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
 
 use crate::{
-	genetic::{self, GenAlg, Genome, Mutator, OnceMutator, Predicate, Selector},
+	genetic::{
+		self, Configurable, ConfiguredGenAlg, GenAlg, Genome, Mutator, OnceMutator, Predicate,
+		Selector,
+	},
 	params,
 	problems::{Problem, ProblemSet, Solution, Sum3},
 	wasm::GeneDiff,
@@ -196,15 +199,15 @@ where
 	records: Vec<WasmGenomeRecord>, // TODO move to results
 }
 
-impl<P, M, S> WasmGenAlg<P, M, S>
+impl<P, M, S> Configurable<WasmGenAlgConfig<M, S>> for WasmGenAlg<P, M, S>
 where
-	P: Problem,
+	P: Problem + Sync + Clone,
+	ProblemSet: From<P>,
 	M: Mutator<WasmGenome, Context> + Clone + for<'m> Deserialize<'m> + Serialize + 'static,
 	S: Selector<WasmGenome, Context> + Clone + for<'s> Deserialize<'s> + Serialize + 'static,
 {
-	pub fn from_config(
-		config: WasmGenAlgConfig<M, S>,
-	) -> Box<dyn GenAlg<G = WasmGenome, C = Context>> {
+	type Output = dyn GenAlg<G = WasmGenome, C = Context>;
+	fn from_config(config: WasmGenAlgConfig<M, S>) -> Box<Self::Output> {
 		let WasmGenAlgConfig {
 			problem,
 			params,
@@ -217,7 +220,28 @@ where
 		match problem {
 			ProblemSet::Sum3(p) => Box::new(WasmGenAlg::new(p, params, results)),
 			ProblemSet::Sum4(p) => Box::new(WasmGenAlg::new(p, params, results)),
+			ProblemSet::Polynom2(p) => Box::new(WasmGenAlg::new(p, params, results)),
 		}
+	}
+
+	fn gen_config(&self) -> WasmGenAlgConfig<M, S> {
+		let problem = ProblemSet::from(self.problem.clone());
+		WasmGenAlgConfig {
+			problem,
+			params: self.params.clone(),
+			results: self.results.clone(),
+			output_dir: self.outdir.clone(),
+			datafile: self.datafile.clone(),
+			resultsfile: self.resultsfile.clone(),
+		}
+		// clone for simplicity... can fix later
+	}
+
+	fn log_config(&mut self) {
+		let configfile = format!("{}/config.toml", &self.outdir);
+		let config = self.gen_config();
+		let config = toml::to_string(&config).expect("config should serialize");
+		fs::write(configfile, config);
 	}
 }
 
@@ -275,6 +299,7 @@ where
 	S: Selector<WasmGenome, Context>,
 	P::In: WasmParams,
 	P::Out: WasmResults,
+	Self: Configurable<WasmGenAlgConfig<M, S>>, /* TODO relax / reimplement */
 {
 	type G = WasmGenome;
 	type C = Context;
@@ -282,7 +307,7 @@ where
 	fn run(&mut self) {
 		log::info!("Beginning GA trial with seed {}", self.seed);
 
-		fs::create_dir(&self.params.output_dir).unwrap();
+		fs::create_dir(&self.outdir).unwrap();
 
 		self.pop
 			.extend((0..self.params.pop_size).map(|_| self.init_genome.clone()));
@@ -290,12 +315,10 @@ where
 		while self.epoch() {}
 
 		// config.toml
-		let configfile = format!("{}/config.toml", self.params.output_dir);
-		let config = toml::to_string(&self.params).expect("params should serialize");
-		fs::write(configfile, config);
+		self.log_config();
 
 		// data.csv
-		let csvfile = format!("{}/{}", self.params.output_dir, self.params.datafile);
+		let csvfile = format!("{}/{}", self.outdir, self.datafile);
 		let mut wtr = Writer::from_path(csvfile).unwrap();
 		for rec in &self.records {
 			wtr.serialize(rec);
@@ -305,7 +328,7 @@ where
 		// results.txt
 		let mut ctx = self.ctx.borrow_mut();
 		self.results.finalize(&mut ctx, &self.pop);
-		let resultsfile = format!("{}/{}", self.params.output_dir, self.params.resultsfile);
+		let resultsfile = format!("{}/{}", self.outdir, self.resultsfile);
 		let results = serde_json::to_string(&self.results).expect("results should serialize");
 		fs::write(resultsfile, results);
 	}
@@ -338,7 +361,7 @@ where
 				for p in pop.iter().take(10) {
 					log::info!("\t{} <-- {}", p.fitness, p);
 				}
-				let filename = format!("{}/gen_{}.wasm", self.params.output_dir, ctx.generation);
+				let filename = format!("{}/gen_{}.wasm", self.outdir, ctx.generation);
 				let topguy = pop[0].emit();
 				fs::write(filename, topguy);
 			}
@@ -347,14 +370,14 @@ where
 			if self.stop_cond.test(&mut ctx, pop) {
 				log::info!(
 					"Stop condition met, exiting. Results are in ./{}",
-					self.params.output_dir
+					self.outdir
 				);
 				return false;
 			} else if ctx.generation >= self.params.num_generations {
 				log::info!(
 					"Completed {} generations. Results are in ./{}",
 					ctx.generation,
-					self.params.output_dir
+					self.outdir
 				);
 				return false;
 			}
