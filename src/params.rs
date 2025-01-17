@@ -154,14 +154,3 @@ impl<'de> Deserialize<'de> for SeedString {
 		Ok(Self(i))
 	}
 }
-
-/// Input command-line arguments
-#[derive(clap::Parser, Debug)]
-pub struct GenAlgParamsCLI {
-	// TODO -F / --config [filename]  (get rid of this comment and add real description)
-	#[arg(short = 'F', long = "config")]
-	pub config: Option<String>,
-	// TODO -s / --seed [seed] (get rid of this comment and add real description)
-	#[arg(short = 's', long = "seed")]
-	pub seed: Option<u64>,
-}
