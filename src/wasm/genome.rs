@@ -5,7 +5,7 @@ use std::{
 	cell::{Ref, RefCell},
 	cmp,
 	fmt::{Debug, Display},
-	fs,
+	fs, mem,
 	ops::{Deref, DerefMut, Range, RangeBounds},
 };
 
@@ -193,9 +193,17 @@ impl WasmGenome {
 					for (i, op) in oprdr.into_iter().enumerate() {
 						let instr =
 							Instruction::try_from(op?).wrap_err("could not convert instruction")?;
-						// let instr: Instruction<'static> = instr.to_owned();
-						println!("Instr is {instr:?}");
-						// genes.push(WasmGene::new(instr, InnovNum(i)));
+						let instr: Instruction<'static> = match instr {
+							Instruction::BrTable(_, _)
+							| Instruction::TryTable(_, _)
+							| Instruction::Resume { .. }
+							| Instruction::ResumeThrow { .. } => unimplemented!(),
+							// SAFETY: all Cow variants are above, the rest are owned types
+							i => unsafe {
+								mem::transmute::<Instruction<'_>, Instruction<'static>>(i)
+							},
+						};
+						genes.push(WasmGene::new(instr, InnovNum(i)));
 						todo!() // idk why this doesn't work...
 					}
 					for loc in body.get_locals_reader()? {
