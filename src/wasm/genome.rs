@@ -9,14 +9,14 @@ use std::{
 	ops::{Deref, DerefMut, Range, RangeBounds},
 };
 
-use eyre::{eyre, Result};
+use eyre::{eyre, Context as _, Result};
 use rand::Rng;
 use serde::Serialize;
 use wasm_encoder::{
 	CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction, Module,
 	PrimitiveValType, TypeSection, ValType,
 };
-use wasmparser::Parser;
+use wasmparser::{Operator, Parser};
 
 use crate::genetic::{AsContext, Genome};
 
@@ -178,24 +178,31 @@ impl WasmGenome {
 	}
 
 	pub fn from_binary(binary: &[u8]) -> Result<Self> {
-		// let mut module = walrus::Module::from_buffer(binary)
-		// 	.map_err(|e| eyre!("could not create module: {e}"))?;
-		// let func = module
-		// 	.exports
-		// 	.get_func("main")
-		// 	.map_err(|e| eyre!("cannot find main function: {e}"))?;
-		// Ok(WasmGenome {
-		// 	module: RefCell::new(module),
-		// 	func,
-		// 	markers: vec![],
-		// 	fitness: 0.0,
-		// })
+		let mut genes = Vec::new();
+		let mut params = Vec::new();
+		let mut result = Vec::new();
+		let mut locals = Vec::new();
+
 		let par = Parser::new(0);
 		for payload in par.parse_all(binary) {
-			use wasmparser::Payload::*;
+			use wasmparser::Payload;
 			match payload? {
-				CodeSectionStart { count, range, size } => {}
-				CodeSectionEntry(body) => {}
+				Payload::CodeSectionStart { count, range, size } => {}
+				Payload::CodeSectionEntry(body) => {
+					let oprdr = body.get_operators_reader()?;
+					for (i, op) in oprdr.into_iter().enumerate() {
+						let instr =
+							Instruction::try_from(op?).wrap_err("could not convert instruction")?;
+						// let instr: Instruction<'static> = instr.to_owned();
+						println!("Instr is {instr:?}");
+						// genes.push(WasmGene::new(instr, InnovNum(i)));
+						todo!() // idk why this doesn't work...
+					}
+					for loc in body.get_locals_reader()? {
+						// TODO
+					}
+				}
+				Payload::End(_) => break,
 				_ => {}
 			};
 		}
@@ -203,7 +210,14 @@ impl WasmGenome {
 		//			 2. parse locals
 		//			 3. parse code section
 
-		todo!()
+		Ok(WasmGenome {
+			genes,
+			fitness: 0.0,
+			generation: 0,
+			params,
+			result,
+			locals,
+		})
 	}
 
 	/// Insert genes into the genome after a specified index.
@@ -332,7 +346,7 @@ impl WasmGenome {
 				(true, false, true) => {
 					// was disjoint, but now matching
 					diff.push(GeneDiff::Disjoint(last_a..cur_a, last_b..cur_b)); // push disjoint range
-															 // log::debug!("\t\tPushing disjoint ({last_a}..{cur_a}, {last_b}..{cur_b})");
+																  // log::debug!("\t\tPushing disjoint ({last_a}..{cur_a}, {last_b}..{cur_b})");
 					was_matching = true; // start matching range
 					(last_a, last_b) = (cur_a, cur_b);
 					// pass to (_, true, true)

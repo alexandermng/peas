@@ -129,17 +129,20 @@ pub trait AsContext {
 
 /// Aggregates any results from the run. Define hooks to record data.
 pub trait Results: Serialize {
-	type G: Genome<Self::C>;
-	type C: AsContext;
+	type Genome: Genome<Self::Ctx>;
+	type Ctx: AsContext;
+
+	/// Initialize and create enclosing files. Start any timers here.
+	fn initialize(&mut self, ctx: &mut Self::Ctx) {}
 
 	/// Called once every generation, after evaluation and before crafting of next generation.
-	fn record_generation(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {}
+	fn record_generation(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {}
 
 	/// Called upon the algorithm hitting its stop condition. Not called when algorithm completes specified generations.
-	fn record_success(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {}
+	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {}
 
-	/// Finalize results. This happens before serialization to a file. Any adjacent files should be written here.
-	fn finalize(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {}
+	/// Finalize results and save to files.
+	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {}
 }
 
 // /// Default impl for Results. See trait-level docs.

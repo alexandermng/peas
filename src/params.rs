@@ -35,7 +35,8 @@ where
 	pub problem: P,
 	pub params: GenAlgParams<G, C, M, S>,
 
-	#[serde(skip)] // skip for now
+	/// Skipped when serializing, so you must build yourself
+	#[serde(skip)]
 	pub results: R,
 
 	/// Enclosing output directory, containing this config (serialized as `config.toml`) and
@@ -45,13 +46,13 @@ where
 
 	/// Name of csv file storing genome records. Defaults to `data.csv`. Will be found inside
 	/// the output directory.
-	#[serde(default = "default_datafile")]
+	#[serde(skip_serializing, default = "default_datafile")]
 	#[builder(default = default_datafile())]
 	pub datafile: String,
 
 	/// Name of json file storing results. Defaults to `results.json`. Will be found inside the
 	/// output directory.
-	#[serde(default = "default_resultsfile")]
+	#[serde(skip_serializing, default = "default_resultsfile")]
 	#[builder(default = default_resultsfile())]
 	pub resultsfile: String,
 }
@@ -148,8 +149,8 @@ impl<'de> Deserialize<'de> for SeedString {
 	where
 		D: serde::Deserializer<'de>,
 	{
+		let s = String::deserialize(deserializer)?;
 		// TODO some way of string to int
-		let s: &str = Deserialize::deserialize(deserializer)?;
 		let i: u64 = s.parse().map_err(serde::de::Error::custom)?;
 		Ok(Self(i))
 	}

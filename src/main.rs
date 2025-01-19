@@ -1,5 +1,6 @@
 use std::fs;
 
+use chrono::Utc;
 use clap::Parser;
 use eyre::eyre;
 use peas::{
@@ -22,6 +23,10 @@ pub struct GenAlgParamsCLI {
 	/// Config filename
 	#[arg(short = 'F', long = "config")]
 	pub config: Option<String>,
+
+	/// Output directory name (e.g. "trial_1234.log")
+	#[arg(short, long)]
+	pub outfile: Option<String>,
 
 	/// Problem to run. Incompatible with `--config`.
 	#[arg(short = 'p', long = "problem")]
@@ -47,8 +52,44 @@ fn main() -> eyre::Result<()> {
 	if let Some(filename) = args.config {
 		// replay a run
 		let contents = fs::read_to_string(filename)?;
-		let config: WasmGenAlgConfig<WasmMutationSet, TournamentSelection> =
+		let mut config: WasmGenAlgConfig<WasmMutationSet, TournamentSelection> =
 			toml::from_str(&contents)?;
+		if let Some(of) = args.outfile {
+			// mem::take?
+			config.output_dir = of;
+		}
+		// TODO pull in an init.wasm or smthn. this is jank and repeated
+		config.params.init_genome = match &config.problem {
+			ProblemSet::Sum3(_) => {
+				let params = &[StackValType::I32, StackValType::I32, StackValType::I32];
+				let result = &[StackValType::I32];
+				let mut wg = WasmGenome::new(0, params, result);
+				wg.genes
+					.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
+				wg
+			}
+			ProblemSet::Sum4(_) => {
+				let params = &[
+					StackValType::I32,
+					StackValType::I32,
+					StackValType::I32,
+					StackValType::I32,
+				];
+				let result = &[StackValType::I32];
+				let mut wg = WasmGenome::new(0, params, result);
+				wg.genes
+					.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
+				wg
+			}
+			ProblemSet::Polynom2(_) => {
+				let params = &[StackValType::I32, StackValType::I32];
+				let result = &[StackValType::I32];
+				let mut wg = WasmGenome::new(0, params, result);
+				wg.genes
+					.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
+				wg
+			}
+		};
 		let mut ga = WasmGenAlg::<Sum3>::from_config(config);
 		ga.run();
 		return Ok(());
@@ -91,8 +132,9 @@ fn main() -> eyre::Result<()> {
 		AddOperation::from_rate(0.2).into(), // local variable
 		ChangeRoot::from_rate(0.3).into(),   // consts, locals, push onto stack
 	];
+	let seed = args.seed.unwrap_or_else(|| thread_rng().gen());
 	let params = GenAlgParams::builder()
-		.seed(args.seed.unwrap_or_else(|| thread_rng().gen()))
+		.seed(seed)
 		.pop_size(args.pop_size.unwrap_or(100))
 		.num_generations(args.num_generations.unwrap_or(100))
 		.max_fitness(1.0)
@@ -104,7 +146,8 @@ fn main() -> eyre::Result<()> {
 		.crossover_rate(0.95)
 		.enable_speciation(false)
 		.build();
-	let results = WasmGenAlgResults::default();
+	let mut results = WasmGenAlgResults::default();
+	results.outdir = format!("trial_{seed}.log");
 	match problem {
 		//.... hey. it works.
 		ProblemSet::Sum3(p) => {

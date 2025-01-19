@@ -143,25 +143,71 @@ impl AsContext for Context {
 
 #[derive(Default, Debug, Serialize, Clone)]
 pub struct WasmGenAlgResults {
-	pub success: bool,           // whether it found a solution
-	pub num_generations: usize,  // how many generations it ran for
+	pub outdir: String, // results log directory (this enclosing directory)
+	pub resultsfile: Option<String>, // json results (this file name)
+	pub datafile: Option<String>, // collated gene data csv
+	pub success: bool,  // whether it found a solution
+	pub num_generations: usize, // how many generations it ran for
 	pub max_fitnesses: Vec<f64>, // top fitness for each generation
 	pub avg_fitnesses: Vec<f64>, // mean fitness for each generation
+
+	#[serde(skip)]
+	records: Vec<WasmGenomeRecord>, // genome records
 }
 
 impl Results for WasmGenAlgResults {
-	type C = Context;
-	type G = WasmGenome;
+	type Ctx = Context;
+	type Genome = WasmGenome;
 
-	fn record_generation(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {
+	fn initialize(&mut self, ctx: &mut Self::Ctx) {
+		fs::create_dir(&self.outdir).unwrap();
+	}
+
+	fn record_generation(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {
+		// Update context stats
+		ctx.max_fitness = pop[0].fitness;
+		ctx.avg_fitness = pop.iter().map(WasmGenome::fitness).sum::<f64>() / (pop.len() as f64);
 		self.max_fitnesses.push(ctx.max_fitness);
 		self.avg_fitnesses.push(ctx.avg_fitness);
+
+		// Records
+		for (i, p) in pop.iter().enumerate() {
+			let id = ctx.generation * pop.len() + i; // TODO move id into genome itself; assign at reproduction-time
+			self.records.push(WasmGenomeRecord::new(id, p));
+		}
+
+		// Log
+		log::info!("Average Fitness: {}", ctx.avg_fitness);
+		log::info!("Top 10:");
+		for p in pop.iter().take(10) {
+			log::info!("\t{} <-- {}", p.fitness, p);
+		}
+		let filename = format!("{}/gen_{}.wasm", self.outdir, ctx.generation);
+		let topguy = pop[0].emit();
+		fs::write(filename, topguy);
 	}
-	fn record_success(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {
+	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {
 		self.success = true;
 	}
-	fn finalize(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {
+	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {
 		self.num_generations = ctx.generation;
+
+		// data.csv
+		if let Some(datafile) = &self.datafile {
+			let csvfile = format!("{}/{}", self.outdir, datafile);
+			let mut wtr = Writer::from_path(csvfile).unwrap();
+			for rec in &self.records {
+				wtr.serialize(rec);
+			}
+			wtr.flush().unwrap();
+		}
+
+		// results.txt
+		if let Some(resultsfile) = &self.resultsfile {
+			let resultsfile = format!("{}/{}", self.outdir, resultsfile);
+			let results = serde_json::to_string(&self).expect("results should serialize");
+			fs::write(resultsfile, results);
+		}
 	}
 }
 
@@ -187,16 +233,13 @@ where
 	init_genome: WasmGenome,                            // copied from params
 	stop_cond: Box<dyn Predicate<WasmGenome, Context>>, // TODO... idk fix
 
-	seed: u64,           // copied from params
-	outdir: String,      // copied from config, or default
-	datafile: String,    // copied from config, or default
-	resultsfile: String, // copied from config, or default
+	seed: u64,      // copied from params
+	outdir: String, // copied from config, or default
 
 	// Runtime use
 	engine: Engine,
-	ctx: RefCell<Context>,          // runtime context
-	pop: Vec<WasmGenome>,           // population of genomes
-	records: Vec<WasmGenomeRecord>, // TODO move to results
+	ctx: RefCell<Context>, // runtime context
+	pop: Vec<WasmGenome>,  // population of genomes
 }
 
 impl<P, M, S> Configurable<WasmGenAlgConfig<M, S>> for WasmGenAlg<P, M, S>
@@ -211,11 +254,14 @@ where
 		let WasmGenAlgConfig {
 			problem,
 			params,
-			results,
+			mut results,
 			output_dir,
 			datafile,
 			resultsfile,
 		} = config;
+		results.outdir = output_dir; // pull from config
+		results.datafile = Some(datafile);
+		results.resultsfile = Some(resultsfile);
 
 		match problem {
 			ProblemSet::Sum3(p) => Box::new(WasmGenAlg::new(p, params, results)),
@@ -230,9 +276,9 @@ where
 			problem,
 			params: self.params.clone(),
 			results: self.results.clone(),
-			output_dir: self.outdir.clone(),
-			datafile: self.datafile.clone(),
-			resultsfile: self.resultsfile.clone(),
+			output_dir: self.results.outdir.clone(),
+			datafile: self.results.datafile.clone().unwrap_or_default(),
+			resultsfile: self.results.resultsfile.clone().unwrap_or_default(),
 		}
 		// clone for simplicity... can fix later
 	}
@@ -253,6 +299,7 @@ where
 	P::In: WasmParams,
 	P::Out: WasmResults,
 {
+	/// Create a new WasmGenAlg based on the given problem, parameters, and desired results.
 	pub fn new(problem: P, params: WasmGenAlgParams<M, S>, results: WasmGenAlgResults) -> Self {
 		let size = params.pop_size;
 		let seed: u64 = params.seed.into();
@@ -265,9 +312,15 @@ where
 			}),
 			None => Box::new(|_: &mut Context, _: &[WasmGenome]| false),
 		};
-		let outdir = format!("trial_{seed}.log");
-		let datafile = params::default_datafile();
-		let resultsfile = params::default_resultsfile();
+		let outdir = results.outdir.clone(); // copy from results param
+		let datafile = results
+			.datafile
+			.clone()
+			.unwrap_or_else(params::default_datafile);
+		let resultsfile = results
+			.resultsfile
+			.clone()
+			.unwrap_or_else(params::default_resultsfile);
 
 		WasmGenAlg {
 			problem,
@@ -280,14 +333,11 @@ where
 			stop_cond,
 			seed,
 			outdir,
-			datafile,
-			resultsfile,
 
 			// Runtime use
 			engine: Engine::default(),
 			ctx: RefCell::new(Context::new(seed)),
 			pop: Vec::with_capacity(size),
-			records: Vec::new(),
 		}
 	}
 }
@@ -307,30 +357,16 @@ where
 	fn run(&mut self) {
 		log::info!("Beginning GA trial with seed {}", self.seed);
 
-		fs::create_dir(&self.outdir).unwrap();
+		self.results.initialize(self.ctx.get_mut());
+		// config.toml
+		self.log_config();
 
 		self.pop
 			.extend((0..self.params.pop_size).map(|_| self.init_genome.clone()));
 
 		while self.epoch() {}
 
-		// config.toml
-		self.log_config();
-
-		// data.csv
-		let csvfile = format!("{}/{}", self.outdir, self.datafile);
-		let mut wtr = Writer::from_path(csvfile).unwrap();
-		for rec in &self.records {
-			wtr.serialize(rec);
-		}
-		wtr.flush().unwrap();
-
-		// results.txt
-		let mut ctx = self.ctx.borrow_mut();
-		self.results.finalize(&mut ctx, &self.pop);
-		let resultsfile = format!("{}/{}", self.outdir, self.resultsfile);
-		let results = serde_json::to_string(&self.results).expect("results should serialize");
-		fs::write(resultsfile, results);
+		self.results.finalize(self.ctx.get_mut(), &self.pop);
 	}
 
 	fn epoch(&mut self) -> bool {
@@ -344,27 +380,7 @@ where
 			let mut ctx = self.ctx.borrow_mut();
 			let pop = &self.pop[..]; // read-only, guaranteed for hooks to be sorted by fitness
 
-			// Update context stats
-			ctx.max_fitness = pop[0].fitness;
-			ctx.avg_fitness = pop.iter().map(WasmGenome::fitness).sum::<f64>() / (pop.len() as f64);
-
-			// Records
-			for (i, p) in pop.iter().enumerate() {
-				let id = ctx.generation * self.params.pop_size + i; // TODO move id into genome itself; assign at reproduction-time
-				self.records.push(WasmGenomeRecord::new(id, p));
-			}
-
-			// Logging
-			{
-				log::info!("Average Fitness: {}", ctx.avg_fitness);
-				log::info!("Top 10:");
-				for p in pop.iter().take(10) {
-					log::info!("\t{} <-- {}", p.fitness, p);
-				}
-				let filename = format!("{}/gen_{}.wasm", self.outdir, ctx.generation);
-				let topguy = pop[0].emit();
-				fs::write(filename, topguy);
-			}
+			self.results.record_generation(&mut ctx, pop);
 
 			// Test stop condition
 			if self.stop_cond.test(&mut ctx, pop) {
@@ -381,8 +397,6 @@ where
 				);
 				return false;
 			}
-
-			self.results.record_generation(&mut ctx, pop);
 
 			// Update parameters for next generation
 			ctx.generation += 1;
@@ -468,6 +482,7 @@ where
 			"should be fully populated"
 		);
 
+		// TODO move to some "record_create_generation"
 		let mut ctx = self.ctx.borrow_mut();
 		log::info!(
 			"Created generation {} (size {}). {} new innovations; {} total innovations.",
