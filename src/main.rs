@@ -1,6 +1,5 @@
 use std::fs;
 
-use chrono::Utc;
 use clap::Parser;
 use eyre::eyre;
 use peas::{
@@ -147,7 +146,9 @@ fn main() -> eyre::Result<()> {
 		.enable_speciation(false)
 		.build();
 	let mut results = WasmGenAlgResults::default();
-	results.outdir = format!("trial_{seed}.log");
+	results.outdir = format!("data/trial_{seed}.log");
+	results.resultsfile = Some("results.json".into());
+	results.datafile = Some("data.csv".into()); // TODO deduplicate much of this by just loading a default config and merging in passed args
 	match problem {
 		//.... hey. it works.
 		ProblemSet::Sum3(p) => {

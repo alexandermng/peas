@@ -222,10 +222,10 @@ impl Results for WasmGenAlgResults {
 			wtr.flush().unwrap();
 		}
 
-		// results.txt
+		// results.json
 		if let Some(resultsfile) = &self.resultsfile {
 			let resultsfile = format!("{}/{}", self.outdir, resultsfile);
-			let results = serde_json::to_string(&self).expect("results should serialize");
+			let results = serde_json::to_string_pretty(&self).expect("results should serialize");
 			fs::write(resultsfile, results);
 		}
 	}
