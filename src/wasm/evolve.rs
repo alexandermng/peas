@@ -8,6 +8,7 @@ use std::{
 	marker::PhantomData,
 	mem,
 	ops::Range,
+	time::Instant,
 };
 
 use bon::{builder, Builder};
@@ -101,6 +102,9 @@ pub struct Context {
 	pub(crate) rng: Pcg64Mcg,                // reproducible rng
 	innov_cnt: InnovNum,                     // innovation number count
 	cur_innovs: HashMap<InnovKey, InnovNum>, // running log of current unique innovations, cleared per-generation.
+
+	start_time: Instant,  // start time of run
+	latest_time: Instant, // time since last generation
 }
 
 impl Context {
@@ -112,6 +116,8 @@ impl Context {
 			rng: Pcg64Mcg::seed_from_u64(seed),
 			innov_cnt: InnovNum(0),
 			cur_innovs: HashMap::new(),
+			start_time: Instant::now(),
+			latest_time: Instant::now(),
 		}
 	}
 
@@ -148,11 +154,13 @@ pub struct WasmGenAlgResults {
 	pub datafile: Option<String>, // collated gene data csv
 	pub success: bool,  // whether it found a solution
 	pub num_generations: usize, // how many generations it ran for
+	pub total_time: f64, // total time of run, in seconds
 	pub max_fitnesses: Vec<f64>, // top fitness for each generation
 	pub avg_fitnesses: Vec<f64>, // mean fitness for each generation
+	pub times: Vec<f64>, // evaluation times for each generation, in seconds
 
 	#[serde(skip)]
-	records: Vec<WasmGenomeRecord>, // genome records
+	records: Vec<WasmGenomeRecord>, // genome records, saved to datafile
 }
 
 impl Results for WasmGenAlgResults {
@@ -161,9 +169,15 @@ impl Results for WasmGenAlgResults {
 
 	fn initialize(&mut self, ctx: &mut Self::Ctx) {
 		fs::create_dir(&self.outdir).unwrap();
+
+		ctx.start_time = Instant::now();
+		ctx.latest_time = Instant::now();
 	}
 
 	fn record_generation(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {
+		// Record timing
+		self.times.push(ctx.latest_time.elapsed().as_secs_f64());
+
 		// Update context stats
 		ctx.max_fitness = pop[0].fitness;
 		ctx.avg_fitness = pop.iter().map(WasmGenome::fitness).sum::<f64>() / (pop.len() as f64);
@@ -185,11 +199,17 @@ impl Results for WasmGenAlgResults {
 		let filename = format!("{}/gen_{}.wasm", self.outdir, ctx.generation);
 		let topguy = pop[0].emit();
 		fs::write(filename, topguy);
+
+		// Update Timing
+		ctx.latest_time = Instant::now();
 	}
+
 	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {
 		self.success = true;
 	}
+
 	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {
+		self.total_time = ctx.start_time.elapsed().as_secs_f64();
 		self.num_generations = ctx.generation;
 
 		// data.csv
