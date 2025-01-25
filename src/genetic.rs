@@ -16,6 +16,11 @@ pub trait GenAlg {
 	type G: Genome<Self::C>;
 	type C: AsContext;
 
+	/// Run the full algorithm.
+	fn run(&mut self);
+
+	// fn reset(&mut self);
+
 	/// Executes an epoch/generation by performing:
 	/// 1. Evaluation/Simulation, calculating fitnesses
 	/// 2. Selection
@@ -36,6 +41,20 @@ pub trait GenAlg {
 
 	/// Crosses over / recombines two parent individuals to generate a new child individual.
 	fn crossover(&self, a: &Self::G, b: &Self::G) -> Self::G;
+}
+pub trait ConfiguredGenAlg<C>: GenAlg + Configurable<C> {}
+impl<T, C> ConfiguredGenAlg<C> for T where T: GenAlg + Configurable<C> {}
+
+pub trait Configurable<C> {
+	type Output: GenAlg + ?Sized;
+	/// Creates the object from a config
+	fn from_config(config: C) -> Box<Self::Output>;
+
+	/// Recreates the config of the object
+	fn gen_config(&self) -> C;
+
+	/// Outputs the config to a file
+	fn log_config(&mut self);
 }
 
 /// A species in a genetic algorithm
@@ -110,17 +129,20 @@ pub trait AsContext {
 
 /// Aggregates any results from the run. Define hooks to record data.
 pub trait Results: Serialize {
-	type G: Genome<Self::C>;
-	type C: AsContext;
+	type Genome: Genome<Self::Ctx>;
+	type Ctx: AsContext;
+
+	/// Initialize and create enclosing files. Start any timers here.
+	fn initialize(&mut self, ctx: &mut Self::Ctx) {}
 
 	/// Called once every generation, after evaluation and before crafting of next generation.
-	fn record_generation(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {}
+	fn record_generation(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {}
 
 	/// Called upon the algorithm hitting its stop condition. Not called when algorithm completes specified generations.
-	fn record_success(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {}
+	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {}
 
-	/// Finalize results. This happens before serialization to a file. Any adjacent files should be written here.
-	fn finalize(&mut self, ctx: &mut Self::C, pop: &[Self::G]) {}
+	/// Finalize results and save to files.
+	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {}
 }
 
 // /// Default impl for Results. See trait-level docs.
@@ -145,43 +167,6 @@ pub trait Results: Serialize {
 // 			self.num_generations = 0; // TODO need alg to expose params
 // 	}
 // }
-
-/// Represents a task or problem to be solved by a genetic algorithm's individual/agent. Should contain
-/// problem parameters and necessary training data for evaluation.
-pub trait Problem {
-	type In; // type of inputs/arguments to the Agent (e.g. (i32, i32) )
-	type Out; // type of outputs/results from the Agent (e.g. i32 )
-		   // can add stuff like externals later
-
-	/// Calculates a Solution's fitness, defined per-problem
-	fn fitness(&self, soln: impl Solution<Self>) -> f64
-	where
-		Self: Sized; // no "dyn Problem"s
-}
-
-/// A solution to a given problem.
-pub trait Solution<P: Problem, E: Debug = eyre::Error>: Sync {
-	/// Works the problem given the input arguments, returning the output.
-	/// If the solution is fallible, this will panic. Use `try_exec` instead.
-	fn exec(&self, args: P::In) -> P::Out {
-		self.try_exec(args).unwrap()
-	}
-
-	/// Works the problem given the input arguments, returning the output.
-	/// If the solution is fallible, returns an error.
-	fn try_exec(&self, args: P::In) -> Result<P::Out, E>;
-}
-
-impl<P, T, E> Solution<P, E> for &T
-where
-	P: Problem,
-	T: Solution<P, E>,
-	E: Debug,
-{
-	fn try_exec(&self, args: P::In) -> Result<P::Out, E> {
-		(**self).try_exec(args)
-	}
-}
 
 /// The selection operator in a Genetic Algorithm. To be called once per generation, with optional
 /// parameter variation after evaluation each generation.

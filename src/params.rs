@@ -7,20 +7,72 @@ use std::str::FromStr;
 use std::{fs, marker::PhantomData};
 use toml;
 
+use crate::genetic::Results;
+use crate::problems::{Problem, ProblemSet};
 use crate::{
-	genetic::{AsContext, Genome, Mutator, OnceMutator, Predicate, Problem, Selector},
+	genetic::{AsContext, Genome, Mutator, OnceMutator, Predicate, Selector},
 	selection::TournamentSelection,
-	wasm::{mutations::WasmMutation, Context, WasmGenome},
+	wasm::{mutations::WasmMutationSet, Context, WasmGenome},
 };
 
+/// A full config for a genetic algorithm. Meant to be saved to a file.
+#[derive(Serialize, Deserialize, Builder, Debug, Clone)]
+#[serde(bound = "
+	G: Default,
+	R: Default,
+	P: Serialize + for<'p> Deserialize<'p>,
+	M: Serialize + for<'m> Deserialize<'m>,
+	S: Serialize + for<'s> Deserialize<'s>,
+")]
+pub struct GenAlgConfig<G, C, P, R, M, S>
+where
+	G: Genome<C>,
+	C: AsContext,
+	R: Results,
+	M: Mutator<G, C>,
+	S: Selector<G, C>,
+{
+	pub problem: P,
+	pub params: GenAlgParams<G, C, M, S>,
+
+	/// Skipped when serializing, so you must build yourself
+	#[serde(skip)]
+	pub results: R,
+
+	/// Enclosing output directory, containing this config (serialized as `config.toml`) and
+	/// other logs.
+	#[serde(skip)]
+	pub output_dir: String,
+
+	/// Name of csv file storing genome records. Defaults to `data.csv`. Will be found inside
+	/// the output directory.
+	#[serde(skip_serializing, default = "default_datafile")]
+	#[builder(default = default_datafile())]
+	pub datafile: String,
+
+	/// Name of json file storing results. Defaults to `results.json`. Will be found inside the
+	/// output directory.
+	#[serde(skip_serializing, default = "default_resultsfile")]
+	#[builder(default = default_resultsfile())]
+	pub resultsfile: String,
+}
+
+pub(crate) fn default_datafile() -> String {
+	"data.csv".into()
+}
+
+pub(crate) fn default_resultsfile() -> String {
+	"results.json".into()
+}
+
 /// Actual parameters for the genetic algorithm. Can be saved as an output to a file and subsequently loaded in to replicate runs.
-#[derive(Serialize, Deserialize, Builder)]
+#[derive(Serialize, Deserialize, Builder, Debug)]
 #[serde(bound = "
 	G: Default,
 	for<'m> M: Deserialize<'m> + Serialize,
 	for<'s> S: Deserialize<'s> + Serialize
 ")]
-pub struct GenAlgParams<G = WasmGenome, C = Context, M = WasmMutation, S = TournamentSelection>
+pub struct GenAlgParams<G, C, M, S>
 where
 	G: Genome<C>,
 	C: AsContext,
@@ -46,36 +98,34 @@ where
 	pub crossover_rate: f64,
 	pub enable_speciation: bool,
 
-	/// Enclosing output directory, containing this config (serialized as `config.toml`) and
-	/// other logs.
-	#[serde(skip_serializing, default)]
-	pub output_dir: String,
-
-	/// Name of csv file storing genome records. Defaults to `data.csv`. Will be found inside
-	/// the output directory.
-	#[serde(default = "GenAlgParams::default_datafile")]
-	#[builder(default = GenAlgParams::default_datafile())]
-	pub datafile: String,
-
-	/// Name of json file storing results. Defaults to `results.json`. Will be found inside the
-	/// output directory.
-	#[serde(default = "GenAlgParams::default_resultsfile")]
-	#[builder(default = GenAlgParams::default_resultsfile())]
-	pub resultsfile: String,
-
 	#[doc(hidden)]
 	#[serde(skip)]
 	#[builder(skip)]
 	_ctx: PhantomData<C>,
 }
 
-impl GenAlgParams {
-	fn default_datafile() -> String {
-		"data.csv".into()
-	}
-
-	fn default_resultsfile() -> String {
-		"results.json".into()
+impl<G, C, M, S> Clone for GenAlgParams<G, C, M, S>
+where
+	G: Genome<C> + Clone,
+	C: AsContext,
+	M: Mutator<G, C> + Clone,
+	S: Selector<G, C> + Clone,
+{
+	fn clone(&self) -> Self {
+		Self {
+			seed: self.seed.clone(),
+			pop_size: self.pop_size.clone(),
+			num_generations: self.num_generations.clone(),
+			max_fitness: self.max_fitness.clone(),
+			mutators: self.mutators.clone(),
+			mutation_rate: self.mutation_rate.clone(),
+			selector: self.selector.clone(),
+			init_genome: self.init_genome.clone(),
+			elitism_rate: self.elitism_rate.clone(),
+			crossover_rate: self.crossover_rate.clone(),
+			enable_speciation: self.enable_speciation.clone(),
+			_ctx: self._ctx.clone(),
+		}
 	}
 }
 
@@ -99,75 +149,9 @@ impl<'de> Deserialize<'de> for SeedString {
 	where
 		D: serde::Deserializer<'de>,
 	{
+		let s = String::deserialize(deserializer)?;
 		// TODO some way of string to int
-		let s: &str = Deserialize::deserialize(deserializer)?;
 		let i: u64 = s.parse().map_err(serde::de::Error::custom)?;
 		Ok(Self(i))
 	}
 }
-
-/// Input options to set the parameters. Can be read from a config file.
-#[derive(Deserialize)]
-pub struct GenAlgParamsOpts {
-	// TODO take GenAlgParams and... make everything optional. and String-like.
-	pub seed: Option<u64>,
-	pub pop_size: Option<usize>,
-	pub num_generations: Option<usize>,
-
-	pub mutators: Vec<String>, // TODO enrich
-	pub mutation_rate: Option<f64>,
-
-	pub selector: Option<String>, // TODO enrich
-
-	pub init_genome: String, // filename, required
-
-	pub elitism_rate: Option<f64>,
-	pub crossover_rate: Option<f64>,
-	pub enable_speciation: Option<bool>, // TODO add more?
-
-	pub log_file: Option<String>, // location of directory
-}
-
-/// Input command-line arguments
-#[derive(clap::Parser, Debug)]
-pub struct GenAlgParamsCLI {
-	// TODO -F / --config [filename]  (get rid of this comment and add real description)
-	#[arg(short = 'F', long = "config")]
-	pub config: Option<String>,
-	// TODO -s / --seed [seed] (get rid of this comment and add real description)
-	#[arg(short = 's', long = "seed")]
-	pub seed: Option<u64>,
-}
-
-// impl GenAlgParamsOpts {
-// 	fn from_file(filename: &str) -> Self {
-// 		let contents = fs::read_to_string(filename).unwrap();
-// 		let config = toml::from_str(&contents);
-// 		return config.unwrap();
-// 	}
-
-// 	pub fn build(self) -> GenAlgParams {
-// 		let seed = self.seed.unwrap_or(thread_rng().gen());
-// 		let log_file = self.log_file.unwrap_or_else(|| format!("trial_{}.log", 0)); // TODO actual timestamp
-// 		GenAlgParams {
-// 			seed,
-// 			pop_size: self.pop_size.unwrap_or(100),
-// 			num_generations: self.num_generations.unwrap_or(20),
-// 			mutators: self.mutators.into_iter().map(|s| ),
-// 			mutation_rate: self.mutation_rate.unwrap_or(1.0),
-// 			selector: self.selector,       //FIXME?
-// 			init_genome: self.init_genome, //FIXME?
-// 			elitism_rate: self.elitism_rate.unwrap_or(0.05),
-// 			crossover_rate: self.crossover_rate.unwrap_or(0.95),
-// 			enable_speciation: self.enable_speciation.unwrap_or(false),
-
-// 			output_dir: self.log_file.unwrap(),
-// 		}
-// 	}
-// }
-
-// impl From<GenAlgParamsOpts> for GenAlgParams {
-// 	fn from(value: GenAlgParamsOpts) -> Self {
-// 		value.build()
-// 	}
-// }

@@ -16,33 +16,33 @@ use wasmparser::names;
 use crate::wasm::{Context, InnovNum, WasmGene, WasmGenome};
 use crate::{genetic::Mutator, wasm::StackValType};
 
-/// A list of all available mutations
+/// Selection of available mutations
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
-pub enum WasmMutation {
+pub enum WasmMutationSet {
 	AddBinaryOp(AddOperation),
 	ChangeRoot(ChangeRoot),
 	// Sequence(Vec<WasmMutation>),
 }
 
-impl Mutator<WasmGenome, Context> for WasmMutation {
+impl Mutator<WasmGenome, Context> for WasmMutationSet {
 	fn mutate(&self, ctx: &mut Context, indiv: WasmGenome) -> WasmGenome {
 		match self {
-			WasmMutation::AddBinaryOp(add_operation) => add_operation.mutate(ctx, indiv),
-			WasmMutation::ChangeRoot(change_root) => change_root.mutate(ctx, indiv),
+			WasmMutationSet::AddBinaryOp(add_operation) => add_operation.mutate(ctx, indiv),
+			WasmMutationSet::ChangeRoot(change_root) => change_root.mutate(ctx, indiv),
 		}
 	}
 }
 
-impl From<AddOperation> for WasmMutation {
+impl From<AddOperation> for WasmMutationSet {
 	fn from(value: AddOperation) -> Self {
-		WasmMutation::AddBinaryOp(value)
+		WasmMutationSet::AddBinaryOp(value)
 	}
 }
 
-impl From<ChangeRoot> for WasmMutation {
+impl From<ChangeRoot> for WasmMutationSet {
 	fn from(value: ChangeRoot) -> Self {
-		WasmMutation::ChangeRoot(value)
+		WasmMutationSet::ChangeRoot(value)
 	}
 }
 
@@ -77,7 +77,7 @@ impl<M: WasmMutator> Mutator<WasmGenome, Context> for M {
 pub enum MutationLog {
 	AddOp(InnovNum, Instruction<'static>), // AddOp added after gene @ InnovNum, with Op instruction
 	ChangeRoot(InnovNum, Instruction<'static>), // ChangeRoot from gene @ InnovNum, with new instruction
-	Unique(&'static str),                  // unique mutations
+	Unique(&'static str),                       // unique mutations
 }
 
 impl Hash for MutationLog {

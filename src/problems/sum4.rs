@@ -2,40 +2,43 @@
 //! Evolve code that sums 4 inputs
 //!
 
-use peas::{
-	genetic::{Problem, Solution},
-	params::GenAlgParams,
-	selection::TournamentSelection,
-	wasm::{
-		mutations::{AddOperation, ChangeRoot, WasmMutation},
-		InnovNum, StackValType, WasmGenAlg, WasmGene, WasmGenome,
-	},
-};
+use derive_more::derive::Display;
 use rand::{
 	distributions::{Distribution, Uniform},
 	thread_rng, Rng,
 };
+use serde::{Deserialize, Deserializer, Serialize};
 use wasm_encoder::Instruction;
+
+use crate::problems::{Problem, Solution};
 // use rayon::prelude::*;
 
-struct Sum3 {
+#[derive(Serialize, Display, Debug, Clone)]
+#[display("sum4")]
+pub struct Sum4 {
+	pub num_tests: usize,
+	pub partial1_tests_rate: f64,
+	pub partial2_tests_rate: f64,
+	pub partial3_tests_rate: f64,
+
+	#[serde(skip)]
 	tests: Vec<((i32, i32, i32, i32), i32)>, // input-output pairs
 }
 
-impl Sum3 {
-	pub fn new(num: usize) -> Self {
-		const PARTIAL1_TESTS_RATE: f64 = 0.02;
-		const PARTIAL2_TESTS_RATE: f64 = 0.04;
-		const PARTIAL3_TESTS_RATE: f64 = 0.08;
-		const _: () = {
-			const TOTAL_PARTIALS: f64 =
-				PARTIAL1_TESTS_RATE * 4.0 + PARTIAL2_TESTS_RATE * 6.0 + PARTIAL3_TESTS_RATE * 4.0;
-			assert!(TOTAL_PARTIALS < 1.0, "Test rates cannot exceed 1.0!")
+impl Sum4 {
+	pub fn new(num: usize, partial1_rate: f64, partial2_rate: f64, partial3_rate: f64) -> Self {
+		// const partial1_rate: f64 = 0.02;
+		// const partial2_rate: f64 = 0.04;
+		// const partial3_rate: f64 = 0.08;
+		#[cfg(debug_assertions)]
+		{
+			let total_partials = partial1_rate * 4.0 + partial2_rate * 6.0 + partial3_rate * 4.0;
+			assert!(total_partials < 1.0, "Test rates cannot exceed 1.0!")
 		};
 		let mut tests = Vec::with_capacity(num);
-		let partial1_tests_num = (num as f64 * PARTIAL1_TESTS_RATE) as usize;
-		let partial2_tests_num = (num as f64 * PARTIAL2_TESTS_RATE) as usize;
-		let partial3_tests_num = (num as f64 * PARTIAL3_TESTS_RATE) as usize;
+		let partial1_tests_num = (num as f64 * partial1_rate) as usize;
+		let partial2_tests_num = (num as f64 * partial2_rate) as usize;
+		let partial3_tests_num = (num as f64 * partial3_rate) as usize;
 		let dist = Uniform::new(-256, 256);
 		let rng = &mut thread_rng();
 
@@ -84,15 +87,21 @@ impl Sum3 {
 			.map(|input| (input, (input.0 + input.1 + input.2 + input.2)))
 			.collect();
 
-		Self { tests }
+		Self {
+			num_tests: num,
+			partial1_tests_rate: partial1_rate,
+			partial2_tests_rate: partial2_rate,
+			partial3_tests_rate: partial3_rate,
+			tests,
+		}
 	}
 }
 
-impl Problem for Sum3 {
+impl Problem for Sum4 {
 	type In = (i32, i32, i32, i32);
 	type Out = i32;
 
-	fn fitness(&self, soln: impl Solution<Sum3>) -> f64 {
+	fn fitness(&self, soln: impl Solution<Sum4>) -> f64 {
 		let passed: f64 = self
 			.tests
 			// .par_iter()
@@ -103,55 +112,25 @@ impl Problem for Sum3 {
 	}
 }
 
-// impl Solution<Sum3> for Agent {
-// 	fn exec(&self, input: (i32, i32, i32)) -> i32 {
-// 		let linker = Linker::new(&self.engine);
-// 		let mut store = Store::new(&self.engine, ());
-// 		let instance = linker.instantiate(&mut store, &self.module).unwrap();
-// 		let main = instance
-// 			.get_typed_func::<<Sum3 as Problem>::In, <Sum3 as Problem>::Out>(&mut store, "main")
-// 			.unwrap();
+impl<'de> Deserialize<'de> for Sum4 {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		#[derive(Deserialize)]
+		struct Sum4Params {
+			num_tests: usize,
+			partial1_tests_rate: f64,
+			partial2_tests_rate: f64,
+			partial3_tests_rate: f64,
+		}
 
-// 		main.call(&mut store, input).unwrap()
-// 	}
-// }
-
-fn main() {
-	pretty_env_logger::init();
-
-	let prob = Sum3::new(1000);
-	let seed: u64 = thread_rng().gen();
-	let muts: Vec<WasmMutation> = vec![
-		AddOperation::from_rate(0.2).into(), // local variable
-		ChangeRoot::from_rate(0.3).into(),   // consts, locals, push onto stack
-	];
-	let init = {
-		let params = &[
-			StackValType::I32,
-			StackValType::I32,
-			StackValType::I32,
-			StackValType::I32,
-		];
-		let result = &[StackValType::I32];
-		let mut wg = WasmGenome::new(0, params, result);
-		wg.genes
-			.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
-		wg
-	};
-	let params = GenAlgParams::builder()
-		.seed(seed)
-		.pop_size(100)
-		.num_generations(100)
-		.max_fitness(1.0)
-		.mutators(muts)
-		.mutation_rate(1.0)
-		.selector(TournamentSelection::new(0.6, 3, 0.9, false)) // can do real tournament selection when selection is fixed
-		.init_genome(init)
-		.elitism_rate(0.05)
-		.crossover_rate(0.95)
-		.enable_speciation(false)
-		.output_dir(format!("trial_{seed}.log"))
-		.build();
-	let mut ga = WasmGenAlg::new(params, prob);
-	ga.run();
+		let params = Sum4Params::deserialize(deserializer)?;
+		Ok(Sum4::new(
+			params.num_tests,
+			params.partial1_tests_rate,
+			params.partial2_tests_rate,
+			params.partial3_tests_rate,
+		))
+	}
 }
