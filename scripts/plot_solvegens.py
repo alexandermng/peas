@@ -43,6 +43,8 @@ def get_num_gens(trial: str) -> int:
 
 
 def main(args):
+    # manifest stuff TODO/OLD
+    '''
     # Load manifest
     try:
         with open(args.manifest, "r") as file:
@@ -55,11 +57,37 @@ def main(args):
         return
 
     trials = manifest[args.problem]  # list of trial log directories
+    '''
+
+    jsonFlag = False
+    errorcounter = 0
+    trials = []
+
+    try:
+        directory = os.fsencode("data/")
+        #print("here0")
+        for subdir in os.listdir(directory):
+            print(os.fsdecode(subdir))
+            for file in os.listdir(os.fsdecode(directory) + os.fsdecode(subdir)):
+                filename = os.fsdecode(file)
+                #print("here2")
+                if filename.endswith(".json"):
+                    jsonFlag = True
+            if jsonFlag:
+                trials.append(os.fsdecode(directory) + os.fsdecode(subdir))
+                jsonFlag = False
+            else:
+                errorcounter += 1
+    except FileNotFoundError as e:
+        print(f"Error {e}")
+        return
+
     fig = plot_trials(trials)
 
     # Save and show the plot
     fig.savefig(args.output)
     print(f"Plot saved to '{args.output}'.")
+    print(f"number of error runs: {errorcounter}")
     # if args.quiet == True:
     #     return
     # fig.show()

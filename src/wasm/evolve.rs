@@ -210,7 +210,7 @@ impl Results for WasmGenAlgResults {
 
 	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {
 		self.total_time = ctx.start_time.elapsed().as_secs_f64();
-		self.num_generations = ctx.generation;
+		self.num_generations = ctx.generation + 1; //HARDCODED TODO
 
 		// data.csv
 		if let Some(datafile) = &self.datafile {
