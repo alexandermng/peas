@@ -10,6 +10,8 @@ use std::{
 use rand::Rng;
 use serde::Serialize;
 
+use crate::Id;
+
 /// Represents a genetic algorithm, which must implement these genetic operators, for a given Genome type.
 /// It holds parameters for these operators and keeps track of its current population through generations.
 pub trait GenAlg {
@@ -33,14 +35,14 @@ pub trait GenAlg {
 	// Evaluates the population against the given problem/simulation, updating fitnesses.
 	fn evaluate(&mut self);
 
-	/// Consumes and generates a mutated version of an individual.
-	fn mutate(&self, indiv: Self::G) -> Self::G;
+	/// Generates a mutated version of an individual.
+	fn mutate(&self, indiv: Id<Self::G>) -> Id<Self::G>;
 
 	/// Selects the parents for the next generation. Returns the indices of the individuals to select.
 	fn select(&self) -> HashSet<usize>;
 
 	/// Crosses over / recombines two parent individuals to generate a new child individual.
-	fn crossover(&self, a: &Self::G, b: &Self::G) -> Self::G;
+	fn crossover(&self, a: Id<Self::G>, b: Id<Self::G>) -> Self::G;
 }
 pub trait ConfiguredGenAlg<C>: GenAlg + Configurable<C> {}
 impl<T, C> ConfiguredGenAlg<C> for T where T: GenAlg + Configurable<C> {}
@@ -136,13 +138,13 @@ pub trait Results: Serialize {
 	fn initialize(&mut self, ctx: &mut Self::Ctx) {}
 
 	/// Called once every generation, after evaluation and before crafting of next generation.
-	fn record_generation(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {}
+	fn record_generation(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {}
 
 	/// Called upon the algorithm hitting its stop condition. Not called when algorithm completes specified generations.
-	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {}
+	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {}
 
 	/// Finalize results and save to files.
-	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {}
+	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {}
 }
 
 // /// Default impl for Results. See trait-level docs.
@@ -175,8 +177,8 @@ where
 	G: Genome<C>,
 	C: AsContext,
 {
-	fn select(&self, ctx: &mut C, pop: Vec<G>) -> Vec<G>;
-	fn vary_params(&mut self, ctx: &mut C, pop: &[G]) {}
+	fn select(&self, ctx: &mut C, pop: Vec<Id<G>>) -> Vec<Id<G>>;
+	fn vary_params(&mut self, ctx: &mut C, pop: &[Id<G>]) {}
 }
 
 /// The mutation operator in a Genetic Algorithm. Called per-individual, with optional parameter
@@ -187,7 +189,7 @@ where
 	C: AsContext,
 {
 	fn mutate(&self, ctx: &mut C, indiv: G) -> G;
-	fn vary_params(&mut self, ctx: &mut C, pop: &[G]) {}
+	fn vary_params(&mut self, ctx: &mut C, pop: &[Id<G>]) {}
 }
 
 // /// The crossover operator in a Genetic Algorithm. Called per-pair, with optional parameter variation
@@ -207,7 +209,7 @@ where
 	G: Genome<C>,
 	C: AsContext,
 {
-	fn test(&mut self, ctx: &mut C, pop: &[G]) -> bool;
+	fn test(&mut self, ctx: &mut C, pop: &[Id<G>]) -> bool;
 }
 
 /// View the Genetic Algorithm in-progress. Used for logging.
@@ -216,7 +218,7 @@ where
 	G: Genome<C>,
 	C: AsContext,
 {
-	fn peek(&mut self, ctx: &mut C, pop: &[G]);
+	fn peek(&mut self, ctx: &mut C, pop: &[Id<G>]);
 }
 
 /// Mutator meant to be called only once (noop after). Used for gene initialization.
@@ -307,9 +309,9 @@ impl<T, C, G> Predicate<G, C> for T
 where
 	G: Genome<C>,
 	C: AsContext,
-	T: FnMut(&mut C, &[G]) -> bool,
+	T: FnMut(&mut C, &[Id<G>]) -> bool,
 {
-	fn test(&mut self, ctx: &mut C, pop: &[G]) -> bool {
+	fn test(&mut self, ctx: &mut C, pop: &[Id<G>]) -> bool {
 		(self)(ctx, pop)
 	}
 }
@@ -318,9 +320,9 @@ impl<T, C, G> Peeker<G, C> for T
 where
 	G: Genome<C>,
 	C: AsContext,
-	T: FnMut(&mut C, &[G]),
+	T: FnMut(&mut C, &[Id<G>]),
 {
-	fn peek(&mut self, ctx: &mut C, pop: &[G]) {
+	fn peek(&mut self, ctx: &mut C, pop: &[Id<G>]) {
 		(self)(ctx, pop);
 	}
 }

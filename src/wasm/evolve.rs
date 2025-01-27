@@ -1,13 +1,13 @@
 use std::{
 	any::Any,
-	borrow::BorrowMut,
+	borrow::{Borrow, BorrowMut},
 	cell::RefCell,
 	collections::{HashMap, HashSet},
 	fs,
 	hash::{DefaultHasher, Hash, Hasher},
 	marker::PhantomData,
 	mem,
-	ops::Range,
+	ops::{Index, IndexMut, Range},
 	time::Instant,
 };
 
@@ -23,6 +23,7 @@ use rand::{
 use rand_pcg::Pcg64Mcg;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
+use slab::Slab;
 use wasm_encoder::{Instruction, ValType};
 use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
 
@@ -34,6 +35,7 @@ use crate::{
 	params,
 	problems::{Problem, ProblemSet, Solution, Sum3},
 	wasm::GeneDiff,
+	Id,
 };
 use crate::{
 	genetic::{AsContext, Results},
@@ -100,6 +102,7 @@ pub struct Context {
 	pub avg_fitness: f64,  // current mean fitness
 
 	pub(crate) rng: Pcg64Mcg,                // reproducible rng
+	pub(crate) genomes: Slab<WasmGenome>,    // full genome backing store
 	innov_cnt: InnovNum,                     // innovation number count
 	cur_innovs: HashMap<InnovKey, InnovNum>, // running log of current unique innovations, cleared per-generation.
 
@@ -114,12 +117,45 @@ impl Context {
 			max_fitness: 0.0,
 			avg_fitness: 0.0,
 			rng: Pcg64Mcg::seed_from_u64(seed),
+			genomes: Slab::new(),
 			innov_cnt: InnovNum(0),
 			cur_innovs: HashMap::new(),
 			start_time: Instant::now(),
 			latest_time: Instant::now(),
 		}
 	}
+
+	pub fn new_genome(&mut self, genome: WasmGenome) -> Id<WasmGenome> {
+		Id::from(self.genomes.insert(genome))
+	}
+
+	pub fn get_genome(&self, id: Id<WasmGenome>) -> &WasmGenome {
+		self.genomes.get(id.into()).expect("valid genome id")
+	}
+
+	pub fn get_genome_mut(&mut self, id: Id<WasmGenome>) -> &mut WasmGenome {
+		self.genomes.get_mut(id.into()).expect("valid genome id")
+	}
+
+	pub fn iter_genomes<I>(&self, ids: I) -> impl Iterator<Item = &WasmGenome>
+	where
+		I: IntoIterator,
+		I::Item: Borrow<Id<WasmGenome>>,
+	{
+		ids.into_iter().map(move |id| self.get_genome(*id.borrow()))
+	}
+
+	// pub fn iter_genomes_mut<'a, I>(
+	// 	&'a mut self,
+	// 	ids: I,
+	// ) -> impl Iterator<Item = &'a mut WasmGenome> + 'a
+	// where
+	// 	I: IntoIterator<Item = Id<WasmGenome>> + 'a,
+	// {
+	// 	let genomes = &mut self.genomes;
+	// 	ids.into_iter()
+	// 		.map(move |id| genomes.get_mut(id.into()).expect("valid id"))
+	// }
 
 	// /// Get or assign an innovation number to an innovation keyed by location of mutation and instruction added
 	pub fn innov(&mut self, key: InnovKey) -> InnovNum {
@@ -144,6 +180,34 @@ impl AsContext for Context {
 	#[inline]
 	fn generation(&self) -> usize {
 		self.generation
+	}
+}
+
+impl Index<Id<WasmGenome>> for Context {
+	type Output = WasmGenome;
+
+	fn index(&self, id: Id<WasmGenome>) -> &Self::Output {
+		self.get_genome(id)
+	}
+}
+
+impl IndexMut<Id<WasmGenome>> for Context {
+	fn index_mut(&mut self, id: Id<WasmGenome>) -> &mut Self::Output {
+		self.get_genome_mut(id)
+	}
+}
+
+impl Index<&Id<WasmGenome>> for Context {
+	type Output = WasmGenome;
+
+	fn index(&self, id: &Id<WasmGenome>) -> &Self::Output {
+		self.get_genome(*id)
+	}
+}
+
+impl IndexMut<&Id<WasmGenome>> for Context {
+	fn index_mut(&mut self, id: &Id<WasmGenome>) -> &mut Self::Output {
+		self.get_genome_mut(*id)
 	}
 }
 
@@ -174,41 +238,42 @@ impl Results for WasmGenAlgResults {
 		ctx.latest_time = Instant::now();
 	}
 
-	fn record_generation(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {
+	fn record_generation(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {
 		// Record timing
 		self.times.push(ctx.latest_time.elapsed().as_secs_f64());
 
 		// Update context stats
-		ctx.max_fitness = pop[0].fitness;
-		ctx.avg_fitness = pop.iter().map(WasmGenome::fitness).sum::<f64>() / (pop.len() as f64);
+		ctx.max_fitness = ctx[pop[0]].fitness;
+		ctx.avg_fitness =
+			ctx.iter_genomes(pop).map(WasmGenome::fitness).sum::<f64>() / (pop.len() as f64);
 		self.max_fitnesses.push(ctx.max_fitness);
 		self.avg_fitnesses.push(ctx.avg_fitness);
 
 		// Records
-		for (i, p) in pop.iter().enumerate() {
+		for (i, &p) in pop.iter().enumerate() {
 			let id = ctx.generation * pop.len() + i; // TODO move id into genome itself; assign at reproduction-time
-			self.records.push(WasmGenomeRecord::new(id, p));
+			self.records.push(WasmGenomeRecord::new(id, &ctx[p]));
 		}
 
 		// Log
 		log::info!("Average Fitness: {}", ctx.avg_fitness);
 		log::info!("Top 10:");
-		for p in pop.iter().take(10) {
-			log::info!("\t{} <-- {}", p.fitness, p);
+		for &p in pop.iter().take(10) {
+			log::info!("\t{} <-- {}", ctx[p].fitness, p);
 		}
 		let filename = format!("{}/gen_{}.wasm", self.outdir, ctx.generation);
-		let topguy = pop[0].emit();
+		let topguy = ctx[pop[0]].emit();
 		fs::write(filename, topguy);
 
 		// Update Timing
 		ctx.latest_time = Instant::now();
 	}
 
-	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {
+	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {
 		self.success = true;
 	}
 
-	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Self::Genome]) {
+	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {
 		self.total_time = ctx.start_time.elapsed().as_secs_f64();
 		self.num_generations = ctx.generation + 1; //HARDCODED TODO
 
@@ -234,6 +299,7 @@ impl Results for WasmGenAlgResults {
 pub type WasmGenAlgConfig<M, S> =
 	GenAlgConfig<WasmGenome, Context, ProblemSet, WasmGenAlgResults, M, S>;
 pub type WasmGenAlgParams<M, S> = GenAlgParams<WasmGenome, Context, M, S>;
+pub type WasmGenomeId = Id<WasmGenome>;
 
 /// A genetic algorithm for synthesizing WebAssembly modules to solve a problem. The problem must specify
 /// a fitness function. Parametrized across the problem, the mutation type, and the selection type.
@@ -258,8 +324,8 @@ where
 
 	// Runtime use
 	engine: Engine,
-	ctx: RefCell<Context>, // runtime context
-	pop: Vec<WasmGenome>,  // population of genomes
+	ctx: RefCell<Context>,  // runtime context
+	pop: Vec<WasmGenomeId>, // current population of genomes
 }
 
 impl<P, M, S> Configurable<WasmGenAlgConfig<M, S>> for WasmGenAlg<P, M, S>
@@ -327,10 +393,10 @@ where
 		let selector = params.selector.clone();
 		let init_genome = params.init_genome.clone();
 		let stop_cond: Box<dyn Predicate<WasmGenome, Context>> = match params.max_fitness {
-			Some(x) => Box::new(move |ctx: &mut Context, _: &[WasmGenome]| -> bool {
+			Some(x) => Box::new(move |ctx: &mut Context, _: &[Id<WasmGenome>]| -> bool {
 				ctx.max_fitness >= x
 			}),
-			None => Box::new(|_: &mut Context, _: &[WasmGenome]| false),
+			None => Box::new(|_: &mut Context, _: &[Id<WasmGenome>]| false),
 		};
 		let outdir = results.outdir.clone(); // copy from results param
 		let datafile = results
@@ -381,8 +447,8 @@ where
 		// config.toml
 		self.log_config();
 
-		self.pop
-			.extend((0..self.params.pop_size).map(|_| self.init_genome.clone()));
+		let genome0 = self.ctx.get_mut().new_genome(self.init_genome.clone());
+		self.pop.extend((0..self.params.pop_size).map(|_| genome0));
 
 		while self.epoch() {}
 
@@ -393,8 +459,12 @@ where
 		log::info!("Evaluating generation {}.", self.ctx.borrow().generation);
 		self.evaluate();
 
-		self.pop
-			.sort_unstable_by(|a, b| f64::partial_cmp(&b.fitness, &a.fitness).unwrap());
+		{
+			let mut ctx = self.ctx.borrow_mut();
+			self.pop.sort_unstable_by(|a, b| {
+				f64::partial_cmp(&ctx[b].fitness, &ctx[a].fitness).unwrap()
+			});
+		}
 
 		{
 			let mut ctx = self.ctx.borrow_mut();
@@ -429,7 +499,7 @@ where
 			log::info!("Creating generation {}.", ctx.generation);
 		}
 
-		let mut nextgen: Vec<Self::G> = Vec::with_capacity(self.params.pop_size);
+		let mut nextgen: Vec<Id<Self::G>> = Vec::with_capacity(self.params.pop_size);
 
 		let elitism_cnt = (self.params.elitism_rate * (self.params.pop_size as f64)) as usize;
 		let elites = if elitism_cnt > 0 {
@@ -445,9 +515,10 @@ where
 		}
 
 		// TODO extract selection
-		let mut selected = self
-			.selector
-			.select(self.ctx.get_mut(), mem::take(&mut self.pop)); // pop empty after selection
+		let mut selected = {
+			let mut ctx = self.ctx.borrow_mut();
+			self.selector.select(&mut ctx, mem::take(&mut self.pop)) // pop empty after selection
+		};
 		log::info!(
 			"Selected {} individuals from current population.",
 			selected.len()
@@ -471,7 +542,8 @@ where
 			};
 
 			for (a, b) in indices {
-				let child = self.crossover(&selected[a], &selected[b]);
+				let child = self.crossover(selected[a], selected[b]);
+				let child = self.ctx.get_mut().new_genome(child);
 				nextgen.push(child);
 			}
 		} else {
@@ -517,24 +589,28 @@ where
 	}
 
 	fn evaluate(&mut self) {
-		let agents: Vec<_> = self
-			.pop
-			.iter() // OPT can I par_iter here? I think I need WasmGenome: Send / Sync
+		let mut ctx = self.ctx.borrow_mut();
+		let agents: Vec<_> = ctx
+			.iter_genomes(&self.pop)
+			// OPT can I par_iter here? I think I need WasmGenome: Send / Sync
 			.map(WasmGenome::emit)
 			.map(|b| Agent::new(self.engine.clone(), &b))
 			.collect();
 		let fitnai: Vec<_> = agents.par_iter().map(|a| self.problem.fitness(a)).collect();
-		for (g, f) in Iterator::zip(self.pop.iter_mut(), fitnai) {
-			g.fitness = f;
+		for (&g, f) in Iterator::zip(self.pop.iter(), fitnai) {
+			ctx[g].fitness = f;
 		}
 	}
 
-	fn mutate(&self, indiv: Self::G) -> Self::G {
+	fn mutate(&self, indiv: Id<Self::G>) -> Id<Self::G> {
 		let mut ctx = self.ctx.borrow_mut();
-		self.mutators
+		let indiv = ctx[indiv].clone();
+		let indiv = self
+			.mutators
 			.choose(ctx.rng())
 			.expect("non-empty mutators")
-			.mutate(&mut *ctx, indiv)
+			.mutate(&mut *ctx, indiv);
+		ctx.new_genome(indiv)
 	}
 
 	fn select(&self) -> HashSet<usize> {
@@ -546,8 +622,14 @@ where
 		todo!()
 	}
 
-	fn crossover(&self, par_a: &Self::G, par_b: &Self::G) -> Self::G {
+	fn crossover(&self, a: Id<Self::G>, b: Id<Self::G>) -> Self::G {
+		let (par_a, par_b) = {
+			let ctx = self.ctx.borrow();
+			(ctx[a].clone(), ctx[b].clone())
+		};
+		// TODO OPT don't clone. would have to change reproduce context since it also needs ctx
 		let mut ctx = self.ctx.borrow_mut();
-		par_a.reproduce(par_b, &mut *ctx)
+		// SAFETY: reproducing does not mutate the parents in ctx's genome backing
+		par_a.reproduce_into(&par_b, &mut *ctx)
 	}
 }
