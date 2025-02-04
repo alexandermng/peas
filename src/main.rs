@@ -143,7 +143,6 @@ fn main() -> eyre::Result<()> {
 		.init_genome(init)
 		.elitism_rate(0.05)
 		.crossover_rate(0.95)
-		.enable_speciation(false)
 		.build();
 	let mut results = WasmGenAlgResults::default();
 	results.outdir = format!("data/trial_{seed}.log");

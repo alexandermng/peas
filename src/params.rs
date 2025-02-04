@@ -79,7 +79,8 @@ where
 	M: Mutator<G, C>,
 	S: Selector<G, C>,
 {
-	#[builder(into)]
+	#[builder(default, into)]
+	#[serde(default)]
 	pub seed: SeedString, // set seed for the run, can convert into u64
 
 	pub pop_size: usize,
@@ -91,12 +92,15 @@ where
 
 	pub selector: S,
 
+	#[builder(default)]
+	#[serde(default)]
+	pub speciation: SpeciesParams,
+
 	#[serde(skip)]
 	pub init_genome: G,
 
 	pub elitism_rate: f64,
 	pub crossover_rate: f64,
-	pub enable_speciation: bool,
 
 	#[doc(hidden)]
 	#[serde(skip)]
@@ -120,10 +124,10 @@ where
 			mutators: self.mutators.clone(),
 			mutation_rate: self.mutation_rate.clone(),
 			selector: self.selector.clone(),
+			speciation: self.speciation.clone(),
 			init_genome: self.init_genome.clone(),
 			elitism_rate: self.elitism_rate.clone(),
 			crossover_rate: self.crossover_rate.clone(),
-			enable_speciation: self.enable_speciation.clone(),
 			_ctx: self._ctx.clone(),
 		}
 	}
@@ -154,4 +158,18 @@ impl<'de> Deserialize<'de> for SeedString {
 		let i: u64 = s.parse().map_err(serde::de::Error::custom)?;
 		Ok(Self(i))
 	}
+}
+
+impl Default for SeedString {
+	fn default() -> Self {
+		Self(thread_rng().gen())
+	}
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct SpeciesParams {
+	pub enabled: bool,         // whether to use species
+	pub threshold: f64,        // compatibility threshold
+	pub max_species: usize,    // number of species to maintain
+	pub fitness_sharing: bool, // whether to use explicit fitness sharing
 }

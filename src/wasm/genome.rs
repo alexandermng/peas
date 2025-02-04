@@ -18,9 +18,12 @@ use wasm_encoder::{
 };
 use wasmparser::{Operator, Parser};
 
-use crate::genetic::{AsContext, Genome};
+use crate::{
+	genetic::{AsContext, Genome},
+	Id,
+};
 
-use super::Context;
+use super::{species::WasmSpeciesId, Context};
 
 /// A global unique id within a Genetic Algorithm
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
@@ -147,13 +150,16 @@ pub(crate) enum GeneDiff {
 	Disjoint(Range<usize>, Range<usize>),
 }
 
+pub type WasmGenomeId = Id<WasmGenome>;
+
 /// The genome of a Wasm agent/individual, with additional genetic data. Can generate a Wasm Agent: bytecode whose
 /// phenotype is the solution for a particular problem.
 #[derive(Clone, Debug, Default)]
 pub struct WasmGenome {
 	pub genes: Vec<WasmGene<'static>>,
-	pub fitness: f64,      // the fitness of the resulting Agent
-	pub generation: usize, // the generation this was created (+1 from its parents)
+	pub fitness: f64,                   // the fitness of the resulting Agent
+	pub species: Option<WasmSpeciesId>, // the species this genome belongs to
+	pub generation: usize,              // the generation this was created (+1 from its parents)
 
 	pub params: Vec<StackValType>,
 	pub result: Vec<StackValType>,
@@ -169,6 +175,7 @@ impl WasmGenome {
 		WasmGenome {
 			genes: Vec::new(),
 			fitness: 0.0,
+			species: None,
 			generation,
 
 			params,
@@ -221,6 +228,7 @@ impl WasmGenome {
 		Ok(WasmGenome {
 			genes,
 			fitness: 0.0,
+			species: None,
 			generation: 0,
 			params,
 			result,
@@ -434,6 +442,7 @@ impl Genome<Context> for WasmGenome {
 			genes: child,
 			fitness: 0.0,
 			generation: self.generation + 1,
+			species: None, // assigned later
 			params: par_a.params.clone(),
 			result: par_a.result.clone(),
 			locals: par_a.locals.clone(),

@@ -30,7 +30,7 @@ use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults,
 use crate::{
 	genetic::{
 		self, Configurable, ConfiguredGenAlg, GenAlg, Genome, Mutator, OnceMutator, Predicate,
-		Selector,
+		Selector, Species,
 	},
 	params,
 	problems::{Problem, ProblemSet, Solution, Sum3},
@@ -49,7 +49,8 @@ use crate::{
 
 use super::{
 	mutations::{MutationLog, WasmMutationSet},
-	WasmGenomeRecord,
+	species::{WasmSpecies, WasmSpeciesId},
+	WasmGenomeId, WasmGenomeRecord,
 };
 
 /// Assembled phenotype of an individual in a genetic algorithm. Used as a solution to a problem.
@@ -103,6 +104,7 @@ pub struct Context {
 
 	pub(crate) rng: Pcg64Mcg,                // reproducible rng
 	pub(crate) genomes: Slab<WasmGenome>,    // full genome backing store
+	pub(crate) species: Slab<WasmSpecies>,   // species backing store
 	innov_cnt: InnovNum,                     // innovation number count
 	cur_innovs: HashMap<InnovKey, InnovNum>, // running log of current unique innovations, cleared per-generation.
 
@@ -118,6 +120,7 @@ impl Context {
 			avg_fitness: 0.0,
 			rng: Pcg64Mcg::seed_from_u64(seed),
 			genomes: Slab::new(),
+			species: Slab::new(),
 			innov_cnt: InnovNum(0),
 			cur_innovs: HashMap::new(),
 			start_time: Instant::now(),
@@ -125,22 +128,22 @@ impl Context {
 		}
 	}
 
-	pub fn new_genome(&mut self, genome: WasmGenome) -> Id<WasmGenome> {
+	pub fn new_genome(&mut self, genome: WasmGenome) -> WasmGenomeId {
 		Id::from(self.genomes.insert(genome))
 	}
 
-	pub fn get_genome(&self, id: Id<WasmGenome>) -> &WasmGenome {
+	pub fn get_genome(&self, id: WasmGenomeId) -> &WasmGenome {
 		self.genomes.get(id.into()).expect("valid genome id")
 	}
 
-	pub fn get_genome_mut(&mut self, id: Id<WasmGenome>) -> &mut WasmGenome {
+	pub fn get_genome_mut(&mut self, id: WasmGenomeId) -> &mut WasmGenome {
 		self.genomes.get_mut(id.into()).expect("valid genome id")
 	}
 
 	pub fn iter_genomes<I>(&self, ids: I) -> impl Iterator<Item = &WasmGenome>
 	where
 		I: IntoIterator,
-		I::Item: Borrow<Id<WasmGenome>>,
+		I::Item: Borrow<WasmGenomeId>,
 	{
 		ids.into_iter().map(move |id| self.get_genome(*id.borrow()))
 	}
@@ -150,12 +153,33 @@ impl Context {
 	// 	ids: I,
 	// ) -> impl Iterator<Item = &'a mut WasmGenome> + 'a
 	// where
-	// 	I: IntoIterator<Item = Id<WasmGenome>> + 'a,
+	// 	I: IntoIterator<Item = WasmGenomeId> + 'a,
 	// {
 	// 	let genomes = &mut self.genomes;
 	// 	ids.into_iter()
 	// 		.map(move |id| genomes.get_mut(id.into()).expect("valid id"))
 	// }
+
+	/// Creates a new species from a founding genome
+	pub fn new_species(&mut self, founder: WasmGenomeId) -> WasmSpeciesId {
+		let spec = WasmSpecies {
+			representative: founder,
+			members: vec![founder],
+			fitness: self[founder].fitness,
+			capacity: 1, // set later
+			starting_generation: self.generation,
+			archive: vec![founder],
+		};
+		Id::from(self.species.insert(spec))
+	}
+
+	pub fn get_species(&self, id: WasmSpeciesId) -> &WasmSpecies {
+		self.species.get(id.into()).expect("valid species id")
+	}
+
+	pub fn get_species_mut(&mut self, id: WasmSpeciesId) -> &mut WasmSpecies {
+		self.species.get_mut(id.into()).expect("valid species id")
+	}
 
 	// /// Get or assign an innovation number to an innovation keyed by location of mutation and instruction added
 	pub fn innov(&mut self, key: InnovKey) -> InnovNum {
@@ -183,31 +207,59 @@ impl AsContext for Context {
 	}
 }
 
-impl Index<Id<WasmGenome>> for Context {
+impl Index<WasmGenomeId> for Context {
 	type Output = WasmGenome;
 
-	fn index(&self, id: Id<WasmGenome>) -> &Self::Output {
+	fn index(&self, id: WasmGenomeId) -> &Self::Output {
 		self.get_genome(id)
 	}
 }
 
-impl IndexMut<Id<WasmGenome>> for Context {
-	fn index_mut(&mut self, id: Id<WasmGenome>) -> &mut Self::Output {
+impl IndexMut<WasmGenomeId> for Context {
+	fn index_mut(&mut self, id: WasmGenomeId) -> &mut Self::Output {
 		self.get_genome_mut(id)
 	}
 }
 
-impl Index<&Id<WasmGenome>> for Context {
+impl Index<&WasmGenomeId> for Context {
 	type Output = WasmGenome;
 
-	fn index(&self, id: &Id<WasmGenome>) -> &Self::Output {
+	fn index(&self, id: &WasmGenomeId) -> &Self::Output {
 		self.get_genome(*id)
 	}
 }
 
-impl IndexMut<&Id<WasmGenome>> for Context {
-	fn index_mut(&mut self, id: &Id<WasmGenome>) -> &mut Self::Output {
+impl IndexMut<&WasmGenomeId> for Context {
+	fn index_mut(&mut self, id: &WasmGenomeId) -> &mut Self::Output {
 		self.get_genome_mut(*id)
+	}
+}
+
+impl Index<WasmSpeciesId> for Context {
+	type Output = WasmSpecies;
+
+	fn index(&self, id: WasmSpeciesId) -> &Self::Output {
+		self.get_species(id)
+	}
+}
+
+impl IndexMut<WasmSpeciesId> for Context {
+	fn index_mut(&mut self, id: WasmSpeciesId) -> &mut Self::Output {
+		self.get_species_mut(id)
+	}
+}
+
+impl Index<&WasmSpeciesId> for Context {
+	type Output = WasmSpecies;
+
+	fn index(&self, id: &WasmSpeciesId) -> &Self::Output {
+		self.get_species(*id)
+	}
+}
+
+impl IndexMut<&WasmSpeciesId> for Context {
+	fn index_mut(&mut self, id: &WasmSpeciesId) -> &mut Self::Output {
+		self.get_species_mut(*id)
 	}
 }
 
@@ -299,7 +351,6 @@ impl Results for WasmGenAlgResults {
 pub type WasmGenAlgConfig<M, S> =
 	GenAlgConfig<WasmGenome, Context, ProblemSet, WasmGenAlgResults, M, S>;
 pub type WasmGenAlgParams<M, S> = GenAlgParams<WasmGenome, Context, M, S>;
-pub type WasmGenomeId = Id<WasmGenome>;
 
 /// A genetic algorithm for synthesizing WebAssembly modules to solve a problem. The problem must specify
 /// a fitness function. Parametrized across the problem, the mutation type, and the selection type.
@@ -324,8 +375,9 @@ where
 
 	// Runtime use
 	engine: Engine,
-	ctx: RefCell<Context>,  // runtime context
-	pop: Vec<WasmGenomeId>, // current population of genomes
+	ctx: RefCell<Context>,       // runtime context
+	pop: Vec<WasmGenomeId>,      // current population of genomes
+	species: Vec<WasmSpeciesId>, // current active species
 }
 
 impl<P, M, S> Configurable<WasmGenAlgConfig<M, S>> for WasmGenAlg<P, M, S>
@@ -380,8 +432,8 @@ where
 impl<P, M, S> WasmGenAlg<P, M, S>
 where
 	P: Problem + Sync,
-	M: Mutator<WasmGenome, Context> + Clone + for<'m> Deserialize<'m> + Serialize,
-	S: Selector<WasmGenome, Context> + Clone + for<'s> Deserialize<'s> + Serialize,
+	M: Mutator<WasmGenome, Context> + Clone,
+	S: Selector<WasmGenome, Context> + Clone,
 	P::In: WasmParams,
 	P::Out: WasmResults,
 {
@@ -393,10 +445,10 @@ where
 		let selector = params.selector.clone();
 		let init_genome = params.init_genome.clone();
 		let stop_cond: Box<dyn Predicate<WasmGenome, Context>> = match params.max_fitness {
-			Some(x) => Box::new(move |ctx: &mut Context, _: &[Id<WasmGenome>]| -> bool {
+			Some(x) => Box::new(move |ctx: &mut Context, _: &[WasmGenomeId]| -> bool {
 				ctx.max_fitness >= x
 			}),
-			None => Box::new(|_: &mut Context, _: &[Id<WasmGenome>]| false),
+			None => Box::new(|_: &mut Context, _: &[WasmGenomeId]| false),
 		};
 		let outdir = results.outdir.clone(); // copy from results param
 		let datafile = results
@@ -424,6 +476,96 @@ where
 			engine: Engine::default(),
 			ctx: RefCell::new(Context::new(seed)),
 			pop: Vec::with_capacity(size),
+			species: Vec::new(),
+		}
+	}
+}
+
+impl<P, M, S> WasmGenAlg<P, M, S>
+where
+	P: Problem,
+	M: Mutator<WasmGenome, Context>,
+	S: Selector<WasmGenome, Context>,
+	P::In: WasmParams,
+	P::Out: WasmResults,
+{
+	/// Distribute new population into species, after they've been evaluated, at the end of every generation.
+	/// This should happen BEFORE selection/reproduction in the next generation, because it may affect the
+	/// fitness of its members.
+	pub fn speciate(&mut self) {
+		// TODO move to genalg?
+
+		// 1. Empty each species, reducing to a representative
+		let mut map = HashMap::<WasmGenomeId, WasmSpeciesId>::new();
+		for &specid in &self.species {
+			let membs = {
+				let mut ctx = self.ctx.borrow_mut();
+				mem::take(&mut ctx[specid].members) // clears members from species
+			};
+			let rep = *membs
+				.choose(self.ctx.get_mut().rng())
+				.expect("non-empty species");
+			{
+				// update representative
+				let mut ctx = self.ctx.borrow_mut();
+				let mut spec = &mut ctx[specid];
+				spec.representative = rep;
+			}
+			map.insert(rep, specid);
+		}
+
+		// 2. For each individual of new pop, assign to a species (or create new)
+		for &indiv in &self.pop {
+			let mut ctx = self.ctx.borrow_mut();
+			let genom = &ctx[indiv];
+			let mut found = false;
+			for (&rep, &specid) in &map {
+				let rep = &ctx[rep];
+				let dist = genom.dist(rep);
+				if dist < self.params.speciation.threshold {
+					ctx[specid].add_genome(indiv);
+					ctx[indiv].species = Some(specid);
+					found = true;
+					break;
+				}
+			}
+			if !found {
+				let gen = ctx.generation;
+				let specid = ctx.new_species(indiv);
+				ctx[indiv].species = Some(specid);
+				map.insert(indiv, specid);
+			}
+		}
+
+		// 3. Adjust fitnesses of each individual based on species size
+		for &indiv in &self.pop {
+			let mut ctx = self.ctx.borrow_mut();
+			let genom = &ctx[indiv];
+			let spec = &ctx[genom.species.expect("species assigned")];
+			let adj = spec.adjusted_fitness(genom.fitness);
+			ctx[indiv].fitness = adj;
+		}
+
+		// 4. Prune empty species.
+		self.species.retain(|&specid| {
+			let ctx = self.ctx.borrow();
+			let size = ctx[specid].size();
+			if size == 0 {
+				log::info!("Species {} died out.", specid);
+				false
+			} else {
+				true // keep
+			}
+		});
+
+		// 5. For each species, set capacities for next generation based on proportion of fitness.
+		let total_fitness: f64 = self.pop.iter().map(|&g| self.ctx.borrow()[g].fitness).sum();
+		for &specid in &self.species {
+			let ctx = self.ctx.borrow();
+			let f = ctx[specid].members.iter().map(|&g| ctx[g].fitness).sum();
+			let mut ctx = self.ctx.borrow_mut();
+			ctx[specid].fitness = f;
+			ctx[specid].capacity = (f / total_fitness * self.params.pop_size as f64) as usize;
 		}
 	}
 }
@@ -447,7 +589,16 @@ where
 		// config.toml
 		self.log_config();
 
-		let genome0 = self.ctx.get_mut().new_genome(self.init_genome.clone());
+		let genome0 = {
+			// evaluate base fitness before use
+			let mut ctx = self.ctx.borrow_mut();
+			let mut g = ctx.new_genome(self.init_genome.clone());
+			let agent = Agent::new(self.engine.clone(), &ctx[g].emit());
+			ctx[g].fitness = self.problem.fitness(agent);
+			// set species
+			ctx[g].species = Some(ctx.new_species(g));
+			g
+		};
 		self.pop.extend((0..self.params.pop_size).map(|_| genome0));
 
 		while self.epoch() {}
@@ -456,135 +607,213 @@ where
 	}
 
 	fn epoch(&mut self) -> bool {
-		log::info!("Evaluating generation {}.", self.ctx.borrow().generation);
-		self.evaluate();
+		let generation = self.ctx.borrow().generation; // current generation
+		log::info!("Creating generation {}.", generation);
 
-		{
-			let mut ctx = self.ctx.borrow_mut();
-			self.pop.sort_unstable_by(|a, b| {
-				f64::partial_cmp(&ctx[b].fitness, &ctx[a].fitness).unwrap()
-			});
-		}
+		let mut elites: Vec<WasmGenomeId> = Vec::new(); // all elites
 
-		{
-			let mut ctx = self.ctx.borrow_mut();
-			let pop = &self.pop[..]; // read-only, guaranteed for hooks to be sorted by fitness
+		if self.params.speciation.enabled {
+			self.pop.clear(); // clear, population should consist of species members after last-gen's speciation
 
-			self.results.record_generation(&mut ctx, pop);
-
-			// Test stop condition
-			if self.stop_cond.test(&mut ctx, pop) {
-				log::info!(
-					"Stop condition met, exiting. Results are in ./{}",
-					self.outdir
-				);
-				return false;
-			} else if ctx.generation >= self.params.num_generations {
-				log::info!(
-					"Completed {} generations. Results are in ./{}",
-					ctx.generation,
-					self.outdir
-				);
-				return false;
-			}
-
-			// Update parameters for next generation
-			ctx.generation += 1;
-			self.mutators
-				.iter_mut()
-				.for_each(|m| m.vary_params(&mut ctx, pop));
-			self.selector.vary_params(&mut ctx, pop);
-			// self.crossover.vary_params(&mut ctx, pop);
-
-			log::info!("Creating generation {}.", ctx.generation);
-		}
-
-		let mut nextgen: Vec<Id<Self::G>> = Vec::with_capacity(self.params.pop_size);
-
-		let elitism_cnt = (self.params.elitism_rate * (self.params.pop_size as f64)) as usize;
-		let elites = if elitism_cnt > 0 {
-			log::info!("Passing {elitism_cnt} elites to next generation.");
-			self.pop[0..elitism_cnt].to_vec()
-		} else {
-			Vec::new()
-		};
-
-		//TODO speciation
-		if self.params.enable_speciation {
-			todo!();
-		}
-
-		// TODO extract selection
-		let mut selected = {
-			let mut ctx = self.ctx.borrow_mut();
-			self.selector.select(&mut ctx, mem::take(&mut self.pop)) // pop empty after selection
-		};
-		log::info!(
-			"Selected {} individuals from current population.",
-			selected.len()
-		);
-
-		let mut crossover_cnt =
-			(self.params.crossover_rate * (self.params.pop_size as f64)) as usize;
-		if crossover_cnt > 0 {
-			log::info!("Crossing over {crossover_cnt} individuals.");
-
-			let indices: Vec<_> = {
+			// Elitism, Speciation and Crossover independently on each species
+			for &specid in &self.species {
 				let mut ctx = self.ctx.borrow_mut();
-				let dist = Uniform::new(0, selected.len());
-				(0..crossover_cnt)
-					.map(|_| {
-						let a = dist.sample(&mut ctx.rng);
-						let b = dist.sample(&mut ctx.rng);
-						(a, b)
-					})
-					.collect()
+				let mut membs = mem::take(&mut ctx[specid].members);
+				let origlen = membs.len();
+				let cap = ctx[specid].capacity; // capacity for this species
+
+				/* Elitism */
+				let elitism_cnt = (self.params.elitism_rate * (membs.len() as f64)) as usize; // count based on current size
+				let special_elites = if elitism_cnt > 0 {
+					log::info!("Retaining {elitism_cnt} elites from Species #{specid}.");
+					membs.sort_unstable_by(|a, b| {
+						f64::partial_cmp(&ctx[b].fitness, &ctx[a].fitness).unwrap()
+					});
+					membs[0..elitism_cnt].to_vec()
+				} else {
+					Vec::new()
+				}; // elites for this species
+				elites.extend(&special_elites);
+
+				/* Selection */
+				membs = self.selector.select(&mut ctx, membs);
+				let parent_cnt = membs.len();
+				log::debug!("Selected {parent_cnt} survivors from Species #{specid}.");
+
+				/* Crossover */
+				let mut children = Vec::new();
+				let crossover_cnt = (self.params.crossover_rate * (cap as f64)) as usize;
+				if crossover_cnt > 0 {
+					let indices: Vec<_> = {
+						let dist = Uniform::new(0, parent_cnt);
+						(0..crossover_cnt)
+							.map(|_| {
+								let a = dist.sample(&mut ctx.rng);
+								let b = dist.sample(&mut ctx.rng);
+								(a, b)
+							})
+							.collect()
+					}; // crossover_cnt pairs of indices into parents
+
+					for (a, b) in indices {
+						let child = self.crossover(membs[a], membs[b]);
+						let child = ctx.new_genome(child);
+						children.push(child);
+					}
+
+					log::info!("Reproduced {crossover_cnt} children from {parent_cnt} parents in Species #{specid}.");
+				}
+
+				/* Mutation */
+				let max = cap - elitism_cnt;
+				children.extend((0..max).map(|_| {
+					membs // clone a random parent
+						.choose(&mut ctx.rng)
+						.expect("non-empty species")
+				})); // fill with mutation-clones until max capacity
+				let mut children = children
+					.into_iter()
+					.map(|g| self.mutate(g))
+					.collect::<Vec<_>>();
+
+				/* Re-add to pop */
+				ctx[specid].members = membs; // save old members for speciation
+				self.pop.extend(children);
+			}
+			self.pop.extend(elites);
+			// TODO check capacities... what if rounding error?
+			debug_assert!(
+				self.pop.len() == self.params.pop_size,
+				"should be fully populated"
+			);
+		} else {
+			// Regular selection + crossover
+			let mut nextgen: Vec<Id<Self::G>> = Vec::with_capacity(self.params.pop_size);
+
+			let elitism_cnt = (self.params.elitism_rate * (self.params.pop_size as f64)) as usize;
+			if elitism_cnt > 0 {
+				log::info!("Passing {elitism_cnt} elites to next generation.");
+				elites.extend(&self.pop[0..elitism_cnt])
 			};
 
-			for (a, b) in indices {
-				let child = self.crossover(selected[a], selected[b]);
-				let child = self.ctx.get_mut().new_genome(child);
-				nextgen.push(child);
+			// TODO extract selection
+			let mut selected = {
+				let mut ctx = self.ctx.borrow_mut();
+				self.selector.select(&mut ctx, mem::take(&mut self.pop)) // pop empty after selection
+			};
+			log::info!(
+				"Selected {} individuals from current population.",
+				selected.len()
+			);
+
+			let mut crossover_cnt =
+				(self.params.crossover_rate * (self.params.pop_size as f64)) as usize;
+			if crossover_cnt > 0 {
+				log::info!("Crossing over {crossover_cnt} individuals.");
+
+				let indices: Vec<_> = {
+					let mut ctx = self.ctx.borrow_mut();
+					let dist = Uniform::new(0, selected.len());
+					(0..crossover_cnt)
+						.map(|_| {
+							let a = dist.sample(&mut ctx.rng);
+							let b = dist.sample(&mut ctx.rng);
+							(a, b)
+						})
+						.collect()
+				};
+
+				for (a, b) in indices {
+					let child = self.crossover(selected[a], selected[b]);
+					let child = self.ctx.get_mut().new_genome(child);
+					nextgen.push(child);
+				}
+			} else {
+				nextgen.append(&mut selected);
 			}
-		} else {
-			nextgen.append(&mut selected);
+
+			// Mutation
+			let needed = self.params.pop_size - elites.len() - nextgen.len(); // amount needed
+			log::info!(
+				"Mutating {} unique genomes (+{needed} copy-variants).",
+				nextgen.len()
+			);
+			let fill: Vec<_> = nextgen
+				.choose_multiple(&mut self.ctx.get_mut().rng, needed)
+				.cloned()
+				.collect(); // fill to capacity
+			nextgen.extend(fill);
+			self.pop = nextgen
+				// .into_par_iter() // OPT
+				.into_iter()
+				.map(|g| self.mutate(g))
+				.collect();
+
+			// Add to next generation!
+			self.pop.extend(elites);
+			debug_assert!(
+				self.pop.len() == self.params.pop_size,
+				"should be fully populated"
+			);
 		}
 
-		// Mutation
-		let needed = self.params.pop_size - elites.len() - nextgen.len(); // amount needed
-		log::info!(
-			"Mutating {} unique genomes (+{needed} copy-variants).",
-			nextgen.len()
-		);
-		let fill: Vec<_> = nextgen
-			.choose_multiple(&mut self.ctx.get_mut().rng, needed)
-			.cloned()
-			.collect(); // fill to capacity
-		nextgen.extend(fill);
-		self.pop = nextgen
-			// .into_par_iter() // OPT
-			.into_iter()
-			.map(|g| self.mutate(g))
-			.collect();
+		// TODO move to some "record_create_generation" or even just "record_generation" itself
+		{
+			let mut ctx = self.ctx.borrow_mut();
+			log::info!(
+				"Created generation {} (size {}). {} new innovations; {} total innovations.",
+				ctx.generation,
+				self.params.pop_size,
+				ctx.cur_innovs.len(),
+				ctx.innov_cnt,
+			);
+			log::debug!("Innovations were: {:?}", ctx.cur_innovs);
+			ctx.cur_innovs.clear();
+		}
 
-		// Add to next generation!
-		self.pop.extend(elites);
-		debug_assert!(
-			self.pop.len() == self.params.pop_size,
-			"should be fully populated"
-		);
+		/* Evaluation */
+		log::info!("Evaluating generation {generation}.");
+		self.evaluate();
+		log::info!("Done evaluating generation {generation}.");
 
-		// TODO move to some "record_create_generation"
+		/* Speciation */
+		if self.params.speciation.enabled {
+			log::info!("Speciating generation {generation}.");
+			self.speciate();
+		}
+
+		/* Logging */
 		let mut ctx = self.ctx.borrow_mut();
-		log::info!(
-			"Created generation {} (size {}). {} new innovations; {} total innovations.",
-			ctx.generation,
-			self.params.pop_size,
-			ctx.cur_innovs.len(),
-			ctx.innov_cnt,
-		);
-		log::debug!("Innovations were: {:?}", ctx.cur_innovs);
-		ctx.cur_innovs.clear();
+		self.pop
+			.sort_unstable_by(|a, b| f64::partial_cmp(&ctx[b].fitness, &ctx[a].fitness).unwrap());
+		let pop = &self.pop[..]; // read-only, guaranteed for hooks to be sorted by fitness
+
+		self.results.record_generation(&mut ctx, pop);
+
+		// Test stop condition
+		if self.stop_cond.test(&mut ctx, pop) {
+			log::info!(
+				"Stop condition met, exiting. Results are in ./{}",
+				self.outdir
+			);
+			return false;
+		} else if ctx.generation >= self.params.num_generations {
+			log::info!(
+				"Completed {} generations. Results are in ./{}",
+				ctx.generation,
+				self.outdir
+			);
+			return false;
+		}
+
+		// Update parameters for next generation
+		ctx.generation += 1;
+		self.mutators
+			.iter_mut()
+			.for_each(|m| m.vary_params(&mut ctx, pop));
+		self.selector.vary_params(&mut ctx, pop);
+		// self.crossover.vary_params(&mut ctx, pop);
+
 		true
 	}
 
@@ -613,13 +842,9 @@ where
 		ctx.new_genome(indiv)
 	}
 
-	fn select(&self) -> HashSet<usize> {
-		// let mut rng = self.rng.borrow_mut();
-		// (0..self.pop_size)
-		// 	.choose_multiple(&mut *rng, self.selection_cnt)
-		// 	.into_iter()
-		// 	.collect()
-		todo!()
+	fn select(&self, pop: &[Id<Self::G>]) -> Vec<Id<Self::G>> {
+		let mut ctx = self.ctx.borrow_mut();
+		self.selector.select(&mut *ctx, pop.to_vec())
 	}
 
 	fn crossover(&self, a: Id<Self::G>, b: Id<Self::G>) -> Self::G {

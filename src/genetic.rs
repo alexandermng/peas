@@ -38,8 +38,8 @@ pub trait GenAlg {
 	/// Generates a mutated version of an individual.
 	fn mutate(&self, indiv: Id<Self::G>) -> Id<Self::G>;
 
-	/// Selects the parents for the next generation. Returns the indices of the individuals to select.
-	fn select(&self) -> HashSet<usize>;
+	/// Selects the parents for the next generation.
+	fn select(&self, pop: &[Id<Self::G>]) -> Vec<Id<Self::G>>;
 
 	/// Crosses over / recombines two parent individuals to generate a new child individual.
 	fn crossover(&self, a: Id<Self::G>, b: Id<Self::G>) -> Self::G;
@@ -67,17 +67,19 @@ where
 {
 	// fn epoch() ???
 
-	fn select(&mut self, num: usize) -> Vec<&G>;
+	// NOTE: uses the enclosing genalg's selection
+	// fn select(&mut self, ctx: &mut C, num: usize) -> Vec<Id<G>>;
 
-	fn crossover(&mut self, num: usize, parents: Vec<&G>) -> Vec<G>; // TODO consider... will all selected reproduce?
+	// NOTE: uses the enclosing genalg's reproduction
+	// fn crossover(&mut self, num: usize, parents: Vec<&G>) -> Vec<G>;
 
-	fn add_genome(&mut self, g: G);
+	fn add_genome(&mut self, g: Id<G>);
 
 	/// Adjust individual fitnesses based on average fitness of species
-	fn adjust_fitness(&mut self);
+	fn adjusted_fitness(&self, fitness: f64) -> f64;
 
 	fn fitness(&self) -> f64;
-	fn representative(&self) -> &G;
+	fn representative(&self) -> Id<G>;
 	fn size(&self) -> usize;
 }
 
@@ -113,6 +115,8 @@ pub trait AsContext {
 	fn generation(&self) -> usize;
 
 	// TODO: params?
+
+	// TODO: require Index<Id<G>, Output = G>?
 }
 
 // TODO add conversion
