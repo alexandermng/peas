@@ -1,7 +1,7 @@
 use derive_more::derive::Display;
 use rand::{
-	distributions::{Distribution, Uniform},
-	thread_rng, Rng,
+	distr::{Distribution, Uniform},
+	Rng,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use wasm_encoder::Instruction;
@@ -29,8 +29,8 @@ impl Polynom<2> {
 		// const partial1_rate: f64 = 0.3;
 		let mut tests = Vec::with_capacity(num);
 		let partial1_tests_num = (num as f64 * partial1_rate) as usize;
-		let dist = Uniform::new(-256, 256);
-		let rng = &mut thread_rng();
+		let dist = Uniform::new(-256, 256).unwrap();
+		let rng = &mut rand::rng();
 
 		// partial x=0
 		tests.extend(

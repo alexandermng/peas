@@ -5,8 +5,7 @@ use std::mem;
 
 use eyre::Result;
 use rand::{
-	distributions::{Bernoulli, Distribution, Uniform},
-	seq::SliceRandom,
+	seq::{IndexedRandom, SliceRandom},
 	Rng,
 };
 use serde::{Deserialize, Serialize};
@@ -62,7 +61,7 @@ impl<M: WasmMutator> Mutator<WasmGenome, Context> for M {
 	fn mutate(&self, ctx: &mut Context, mut indiv: WasmGenome) -> WasmGenome {
 		let valids = self.find_valids(&indiv);
 		let rate = self.rate(ctx, &indiv);
-		if valids.is_empty() || !ctx.rng.gen_bool(rate) {
+		if valids.is_empty() || !ctx.rng.random_bool(rate) {
 			return indiv;
 		}
 		let chosen = *valids.choose(&mut ctx.rng).unwrap();
@@ -243,7 +242,7 @@ impl WasmMutator for ChangeRoot {
 
 		let root = match pushty {
 			StackValType::I32 => {
-				let do_var = !i32vars.is_empty() && ctx.rng.gen_bool(0.6);
+				let do_var = !i32vars.is_empty() && ctx.rng.random_bool(0.6);
 				if do_var { i32vars } else { i32consts }
 					.choose(&mut ctx.rng)
 					.unwrap()

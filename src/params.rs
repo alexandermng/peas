@@ -1,6 +1,6 @@
 use bon::{builder, Builder};
 use derive_more::derive::{From, Into};
-use rand::{thread_rng, Rng};
+use rand::Rng;
 use serde::{Deserialize, Serialize, Serializer};
 use std::path::Path;
 use std::str::FromStr;
@@ -165,7 +165,7 @@ impl<'de> Deserialize<'de> for SeedString {
 
 impl Default for SeedString {
 	fn default() -> Self {
-		Self(thread_rng().gen())
+		Self(rand::rng().random())
 	}
 }
 

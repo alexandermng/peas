@@ -4,8 +4,8 @@
 
 use derive_more::derive::Display;
 use rand::{
-	distributions::{Distribution, Uniform},
-	thread_rng, Rng,
+	distr::{Distribution, Uniform},
+	Rng,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use wasm_encoder::Instruction;
@@ -39,8 +39,8 @@ impl Sum4 {
 		let partial1_tests_num = (num as f64 * partial1_rate) as usize;
 		let partial2_tests_num = (num as f64 * partial2_rate) as usize;
 		let partial3_tests_num = (num as f64 * partial3_rate) as usize;
-		let dist = Uniform::new(-256, 256);
-		let rng = &mut thread_rng();
+		let dist = Uniform::new(-256, 256).unwrap();
+		let rng = &mut rand::rng();
 
 		tests.extend((0..partial1_tests_num).map(|_| (dist.sample(rng), 0, 0, 0))); // partial_a
 		tests.extend((0..partial1_tests_num).map(|_| (0, dist.sample(rng), 0, 0))); // partial_b

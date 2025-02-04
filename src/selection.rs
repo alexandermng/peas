@@ -4,7 +4,7 @@
 use std::ops::Index;
 
 use rand::{
-	distributions::{Bernoulli, Distribution, Uniform},
+	distr::{Bernoulli, Distribution},
 	seq::{IteratorRandom, SliceRandom},
 	Rng,
 };

@@ -446,7 +446,7 @@ impl Genome<Context> for WasmGenome {
 					child.extend(par_a[mat].iter().cloned());
 				}
 				GeneDiff::Disjoint(a, b) => {
-					let choice = if ctx.rng().gen_bool(0.5) {
+					let choice = if ctx.rng().random_bool(0.5) {
 						&par_a[a]
 					} else {
 						&par_b[b]

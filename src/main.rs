@@ -13,7 +13,7 @@ use peas::{
 		WasmGenAlg, WasmGenAlgConfig,
 	},
 };
-use rand::{thread_rng, Rng};
+use rand::Rng;
 use wasm_encoder::Instruction;
 
 /// Input command-line arguments
@@ -131,7 +131,7 @@ fn main() -> eyre::Result<()> {
 		AddOperation::from_rate(0.1).into(), // local variable
 		ChangeRoot::from_rate(0.4).into(),   // consts, locals, push onto stack
 	];
-	let seed = args.seed.unwrap_or_else(|| thread_rng().gen());
+	let seed = args.seed.unwrap_or_else(|| rand::rng().random());
 	let params = GenAlgParams::builder()
 		.seed(seed)
 		.pop_size(args.pop_size.unwrap_or(100))

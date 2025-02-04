@@ -16,7 +16,9 @@ use bon::{builder, Builder};
 use csv::Writer;
 use eyre::{eyre, DefaultHandler, Error, OptionExt, Result, WrapErr};
 use rand::{
-	distributions::Uniform, prelude::Distribution, seq::SliceRandom, thread_rng, Rng, SeedableRng,
+	distr::{Distribution, Uniform},
+	seq::{IndexedRandom, SliceRandom},
+	Rng, SeedableRng,
 };
 use rand_pcg::Pcg64Mcg;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -785,7 +787,7 @@ where
 				if crossover_cnt > 0 && membs.len() >= 2 {
 					let indices: Vec<_> = {
 						let mut ctx = self.ctx.borrow_mut();
-						let dist = Uniform::new(0, parent_cnt);
+						let dist = Uniform::new(0, parent_cnt).unwrap();
 						(0..crossover_cnt)
 							.map(|_| {
 								let a = dist.sample(&mut ctx.rng);
@@ -863,7 +865,7 @@ where
 
 				let indices: Vec<_> = {
 					let mut ctx = self.ctx.borrow_mut();
-					let dist = Uniform::new(0, selected.len());
+					let dist = Uniform::new(0, selected.len()).unwrap();
 					(0..crossover_cnt)
 						.map(|_| {
 							let a = dist.sample(&mut ctx.rng);
