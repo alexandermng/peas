@@ -387,12 +387,12 @@ impl WasmGenome {
 				}
 			}
 		}
-		log::debug!("Found diff ranges for (0..{len_a}, 0..{len_b}): {diff:?}");
+		// log::debug!("Found diff ranges for (0..{len_a}, 0..{len_b}): {diff:?}");
 		diff
 	}
 }
 
-// TODO move or make configurable
+// TODO move into SpeciesParams and... make accessible somehow
 const DIST_COEFF_EXCESS: f64 = 0.3;
 const DIST_COEFF_DISJOINT: f64 = 0.5;
 
@@ -408,7 +408,13 @@ impl Genome<Context> for WasmGenome {
 					GeneDiff::Disjoint(a, b) if b.is_empty() => (acc_e + a.len(), acc_d),
 					GeneDiff::Disjoint(a, b) => (acc_e, acc_d + b.len()),
 				});
-		(DIST_COEFF_EXCESS * (num_excess as f64) + DIST_COEFF_DISJOINT * (num_disjoint as f64)) / n
+		let score = (DIST_COEFF_EXCESS * (num_excess as f64)
+			+ DIST_COEFF_DISJOINT * (num_disjoint as f64))
+			/ n;
+		log::debug!(
+			"Dist between {self} and {other}:\n\texcess: {num_excess}, disjoint: {num_disjoint}, n: {n}\n\t -> score: {score}",
+		);
+		score
 	}
 
 	fn fitness(&self) -> f64 {
@@ -418,7 +424,7 @@ impl Genome<Context> for WasmGenome {
 	fn reproduce(&self, other: &Self, mut ctx: &mut Context) -> Self {
 		let par_a = self;
 		let par_b = other;
-		log::debug!("Crossing over:\n\ta = {par_a:?}\n\tb = {par_b:?}");
+		// log::debug!("Crossing over:\n\ta = {par_a:?}\n\tb = {par_b:?}");
 		let diff = par_a.diff(par_b);
 
 		let mut child: Vec<WasmGene> = Vec::with_capacity(par_a.len());

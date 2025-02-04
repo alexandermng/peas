@@ -308,10 +308,17 @@ impl Results for WasmGenAlgResults {
 		}
 
 		// Log
-		log::info!("Average Fitness: {}", ctx.avg_fitness);
+		log::info!("Average Fitness: {:.5}", ctx.avg_fitness);
 		log::info!("Top 10:");
 		for &p in pop.iter().take(10) {
-			log::info!("\t{} <-- {}", ctx[p].fitness, p);
+			log::info!(
+				"\t{:.3} <-- {} (gen {}, len {}, species #{})",
+				ctx[p].fitness,
+				p,
+				ctx[p].generation,
+				ctx[p].len(),
+				ctx[p].species.expect("has species")
+			);
 		}
 		let filename = format!("{}/gen_{}.wasm", self.outdir, ctx.generation);
 		let topguy = ctx[pop[0]].emit();
@@ -515,6 +522,7 @@ where
 		}
 
 		// 2. For each individual of new pop, assign to a species (or create new)
+		let mut species_added = Vec::new();
 		for &indiv in &self.pop {
 			let mut ctx = self.ctx.borrow_mut();
 			let genom = &ctx[indiv];
@@ -534,39 +542,104 @@ where
 				let specid = ctx.new_species(indiv);
 				ctx[indiv].species = Some(specid);
 				map.insert(indiv, specid);
+				species_added.push(specid);
+			}
+		}
+		let num_added = species_added.len();
+		self.species.extend(species_added);
+
+		// 3. Adjust fitnesses of each individual based on species size
+		if self.params.speciation.fitness_sharing {
+			for &indiv in &self.pop {
+				let mut ctx = self.ctx.borrow_mut();
+				let genom = &ctx[indiv];
+				let spec = &ctx[genom.species.expect("species assigned")];
+				let adj = spec.adjusted_fitness(genom.fitness);
+				ctx[indiv].fitness = adj;
 			}
 		}
 
-		// 3. Adjust fitnesses of each individual based on species size
-		for &indiv in &self.pop {
-			let mut ctx = self.ctx.borrow_mut();
-			let genom = &ctx[indiv];
-			let spec = &ctx[genom.species.expect("species assigned")];
-			let adj = spec.adjusted_fitness(genom.fitness);
-			ctx[indiv].fitness = adj;
-		}
-
 		// 4. Prune empty species.
+		let mut num_pruned = 0;
 		self.species.retain(|&specid| {
 			let ctx = self.ctx.borrow();
 			let size = ctx[specid].size();
 			if size == 0 {
-				log::info!("Species {} died out.", specid);
+				log::info!("Species #{} died out.", specid);
+				num_pruned += 1;
 				false
 			} else {
 				true // keep
 			}
 		});
 
-		// 5. For each species, set capacities for next generation based on proportion of fitness.
+		// 5. For each species, set capacities for next generation based on proportion of fitness. Ensure population count.
 		let total_fitness: f64 = self.pop.iter().map(|&g| self.ctx.borrow()[g].fitness).sum();
+		let mut count = 0;
+		let mut priority = Vec::new(); // underrepresented species (have fitness but no capacity because they were too large)
 		for &specid in &self.species {
-			let ctx = self.ctx.borrow();
-			let f = ctx[specid].members.iter().map(|&g| ctx[g].fitness).sum();
+			let f: f64 = {
+				let ctx = self.ctx.borrow();
+				ctx[specid].members.iter().map(|&g| ctx[g].fitness).sum()
+			};
+			let cap = (f / total_fitness * self.params.pop_size as f64) as usize;
+			if cap == 0 && f > 0.0 {
+				priority.push(specid);
+			}
 			let mut ctx = self.ctx.borrow_mut();
 			ctx[specid].fitness = f;
-			ctx[specid].capacity = (f / total_fitness * self.params.pop_size as f64) as usize;
+			ctx[specid].capacity = cap;
+			log::debug!(
+				"Species #{specid} (size {}) set to {} capacity ({:.3} / {:.3} => {:.3} fitness)",
+				ctx[specid].size(),
+				cap,
+				f,
+				total_fitness,
+				f / total_fitness,
+			);
+			count += cap;
 		}
+		if count < self.params.pop_size {
+			let mut ctx = self.ctx.borrow_mut();
+			let num = self.params.pop_size - count;
+			log::debug!(
+				"Total capacity {count} less than pop size {}! Adding {num} individuals.",
+				self.params.pop_size
+			);
+			for _ in 0..num {
+				let s = *priority
+					.choose(ctx.rng())
+					.expect("some species were underrepresented"); // NOTE: i think in theory this could fail, hmm.
+				ctx[s].capacity += 1;
+				count += 1;
+			} // randomly increment underrepresented species
+		}
+		debug_assert_eq!(
+			count, self.params.pop_size,
+			"population count should be correct"
+		);
+		// TODO consider possibility of overproducing... maybe just add to/remove from the largest species? would need to weighted sample
+
+		// 5. Prune species with no capacity.
+		self.species.retain(|&specid| {
+			let ctx = self.ctx.borrow();
+			let cap = ctx[specid].capacity;
+			if cap == 0 {
+				log::debug!("Species #{} pruned for 0 capacity.", specid);
+				num_pruned += 1;
+				false
+			} else {
+				true // keep
+			}
+		});
+
+		log::info!(
+			"Speciated {} individuals into {} species (+{} added, -{} pruned).",
+			self.pop.len(),
+			self.species.len(),
+			num_added,
+			num_pruned,
+		);
 	}
 }
 
@@ -589,17 +662,30 @@ where
 		// config.toml
 		self.log_config();
 
-		let genome0 = {
+		let (genome0, species0) = {
 			// evaluate base fitness before use
 			let mut ctx = self.ctx.borrow_mut();
 			let mut g = ctx.new_genome(self.init_genome.clone());
 			let agent = Agent::new(self.engine.clone(), &ctx[g].emit());
 			ctx[g].fitness = self.problem.fitness(agent);
 			// set species
-			ctx[g].species = Some(ctx.new_species(g));
-			g
+			let specid = ctx.new_species(g);
+			ctx[g].species = Some(specid);
+			(g, specid)
 		};
 		self.pop.extend((0..self.params.pop_size).map(|_| genome0));
+		if self.params.speciation.enabled {
+			self.species.push(species0);
+			let mut ctx = self.ctx.borrow_mut();
+			ctx[species0].members = self.pop.clone(); // all clones are in this species
+			ctx[species0].capacity = self.params.pop_size;
+			log::info!(
+				"Created Species #{} with {} members, {} capacity.",
+				species0,
+				ctx[species0].size(),
+				ctx[species0].capacity
+			);
+		}
 
 		while self.epoch() {}
 
@@ -617,34 +703,47 @@ where
 
 			// Elitism, Speciation and Crossover independently on each species
 			for &specid in &self.species {
-				let mut ctx = self.ctx.borrow_mut();
-				let mut membs = mem::take(&mut ctx[specid].members);
+				let (mut membs, mut cap_remaining) = {
+					let mut ctx = self.ctx.borrow_mut();
+					(mem::take(&mut ctx[specid].members), ctx[specid].capacity)
+				};
 				let origlen = membs.len();
-				let cap = ctx[specid].capacity; // capacity for this species
+				log::debug!(
+					"Reproducing Species #{specid} from {origlen} members to {cap_remaining} capacity."
+				);
 
 				/* Elitism */
-				let elitism_cnt = (self.params.elitism_rate * (membs.len() as f64)) as usize; // count based on current size
+				let elitism_cnt =
+					((self.params.elitism_rate * (origlen as f64)) as usize).min(cap_remaining); // count based on current size, but capped at cap
 				let special_elites = if elitism_cnt > 0 {
-					log::info!("Retaining {elitism_cnt} elites from Species #{specid}.");
+					let mut ctx = self.ctx.borrow_mut();
 					membs.sort_unstable_by(|a, b| {
 						f64::partial_cmp(&ctx[b].fitness, &ctx[a].fitness).unwrap()
 					});
+					log::debug!("Retaining {elitism_cnt} elites from Species #{specid}.");
 					membs[0..elitism_cnt].to_vec()
 				} else {
 					Vec::new()
 				}; // elites for this species
 				elites.extend(&special_elites);
+				cap_remaining -= elitism_cnt;
 
 				/* Selection */
-				membs = self.selector.select(&mut ctx, membs);
+				membs = if membs.len() <= 2 {
+					membs
+				} else {
+					let mut ctx = self.ctx.borrow_mut();
+					self.selector.select(&mut ctx, membs)
+				};
 				let parent_cnt = membs.len();
 				log::debug!("Selected {parent_cnt} survivors from Species #{specid}.");
 
 				/* Crossover */
 				let mut children = Vec::new();
-				let crossover_cnt = (self.params.crossover_rate * (cap as f64)) as usize;
-				if crossover_cnt > 0 {
+				let crossover_cnt = (self.params.crossover_rate * (cap_remaining as f64)) as usize;
+				if crossover_cnt > 0 && membs.len() >= 2 {
 					let indices: Vec<_> = {
+						let mut ctx = self.ctx.borrow_mut();
 						let dist = Uniform::new(0, parent_cnt);
 						(0..crossover_cnt)
 							.map(|_| {
@@ -657,34 +756,44 @@ where
 
 					for (a, b) in indices {
 						let child = self.crossover(membs[a], membs[b]);
-						let child = ctx.new_genome(child);
+						let child = self.ctx.get_mut().new_genome(child);
 						children.push(child);
 					}
+					debug_assert_eq!(children.len(), crossover_cnt);
 
-					log::info!("Reproduced {crossover_cnt} children from {parent_cnt} parents in Species #{specid}.");
+					log::debug!("Reproduced {crossover_cnt} children from {parent_cnt} parents in Species #{specid}.");
+					cap_remaining -= crossover_cnt;
 				}
 
 				/* Mutation */
-				let max = cap - elitism_cnt;
-				children.extend((0..max).map(|_| {
+				children.extend((0..cap_remaining).map(|_| {
+					let mut ctx = self.ctx.borrow_mut();
 					membs // clone a random parent
 						.choose(&mut ctx.rng)
 						.expect("non-empty species")
-				})); // fill with mutation-clones until max capacity
+				})); // fill with clones to max capacity
 				let mut children = children
 					.into_iter()
 					.map(|g| self.mutate(g))
 					.collect::<Vec<_>>();
 
 				/* Re-add to pop */
+				let mut ctx = self.ctx.borrow_mut();
 				ctx[specid].members = membs; // save old members for speciation
 				self.pop.extend(children);
 			}
+			debug_assert!(
+				self.pop.len() <= self.params.pop_size,
+				"should be under capacity ({} > {})",
+				self.pop.len(),
+				self.params.pop_size,
+			);
 			self.pop.extend(elites);
-			// TODO check capacities... what if rounding error?
 			debug_assert!(
 				self.pop.len() == self.params.pop_size,
-				"should be fully populated"
+				"should be fully populated ({} != {})",
+				self.pop.len(),
+				self.params.pop_size,
 			);
 		} else {
 			// Regular selection + crossover

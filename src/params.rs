@@ -170,6 +170,5 @@ impl Default for SeedString {
 pub struct SpeciesParams {
 	pub enabled: bool,         // whether to use species
 	pub threshold: f64,        // compatibility threshold
-	pub max_species: usize,    // number of species to maintain
 	pub fitness_sharing: bool, // whether to use explicit fitness sharing
 }

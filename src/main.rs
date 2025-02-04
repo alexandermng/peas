@@ -4,7 +4,7 @@ use clap::Parser;
 use eyre::eyre;
 use peas::{
 	genetic::{Configurable, GenAlg},
-	params::GenAlgParams,
+	params::{GenAlgParams, SpeciesParams},
 	prelude::*,
 	problems::{Polynom, ProblemSet, Sum3, Sum4},
 	selection::TournamentSelection,
@@ -140,6 +140,11 @@ fn main() -> eyre::Result<()> {
 		.mutators(muts)
 		.mutation_rate(1.0)
 		.selector(TournamentSelection::new(0.6, 3, 0.9, false)) // can do real tournament selection when selection is fixed
+		.speciation(SpeciesParams {
+			enabled: true,
+			threshold: 0.8,
+			fitness_sharing: true,
+		})
 		.init_genome(init)
 		.elitism_rate(0.05)
 		.crossover_rate(0.95)
