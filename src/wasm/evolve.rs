@@ -15,10 +15,7 @@ use bon::{builder, Builder};
 use csv::Writer;
 use eyre::{eyre, DefaultHandler, Error, OptionExt, Result, WrapErr};
 use rand::{
-	distributions::Uniform,
-	prelude::Distribution,
-	seq::{index::sample, IteratorRandom, SliceRandom},
-	thread_rng, Rng, SeedableRng,
+	distributions::Uniform, prelude::Distribution, seq::SliceRandom, thread_rng, Rng, SeedableRng,
 };
 use rand_pcg::Pcg64Mcg;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -179,6 +176,15 @@ impl Context {
 
 	pub fn get_species_mut(&mut self, id: WasmSpeciesId) -> &mut WasmSpecies {
 		self.species.get_mut(id.into()).expect("valid species id")
+	}
+
+	pub fn iter_species<I>(&self, ids: I) -> impl Iterator<Item = &WasmSpecies>
+	where
+		I: IntoIterator,
+		I::Item: Borrow<WasmSpeciesId>,
+	{
+		ids.into_iter()
+			.map(move |id| self.get_species(*id.borrow()))
 	}
 
 	// /// Get or assign an innovation number to an innovation keyed by location of mutation and instruction added
@@ -559,14 +565,14 @@ where
 			}
 		}
 
-		// 4. Prune empty species.
-		let mut num_pruned = 0;
+		// 4. Prune extinct species.
+		let mut num_extinct = 0;
 		self.species.retain(|&specid| {
 			let ctx = self.ctx.borrow();
 			let size = ctx[specid].size();
 			if size == 0 {
-				log::info!("Species #{} died out.", specid);
-				num_pruned += 1;
+				// log::debug!("Species #{} died out.", specid);
+				num_extinct += 1;
 				false
 			} else {
 				true // keep
@@ -580,16 +586,17 @@ where
 			.map(|&g| self.ctx.borrow()[g].fitness())
 			.sum();
 		let mut count = 0;
-		let mut priority = Vec::new(); // underrepresented species (have fitness but no capacity because they were too large)
 		for &specid in &self.species {
 			let f: f64 = {
 				let ctx = self.ctx.borrow();
 				ctx[specid].members.iter().map(|&g| ctx[g].fitness()).sum()
 			};
-			let cap = (f / total_fitness * self.params.pop_size as f64) as usize;
-			if cap == 0 && f > 0.0 {
-				priority.push(specid);
-			}
+			let cap = if f == 0.0 {
+				0
+			} else {
+				(f / total_fitness * self.params.pop_size as f64).ceil() as usize
+				// Always overproduce, allow for small fitness species to survive. Will prune later down.
+			};
 			let mut ctx = self.ctx.borrow_mut();
 			ctx[specid].fitness = f;
 			ctx[specid].capacity = cap;
@@ -603,33 +610,39 @@ where
 			);
 			count += cap;
 		}
-		if count < self.params.pop_size {
+		if count > self.params.pop_size {
+			// Overcounted with ceil earlier, so pruning down randomly, weighted by capacity
+			let num = count - self.params.pop_size;
+			let capmap: Vec<_> = {
+				let mut ctx = self.ctx.borrow_mut();
+				self.species
+					.iter()
+					.map(|&id| (id, ctx[id].capacity as f64))
+					.collect()
+			};
+			let ids: Vec<_> = capmap
+				.choose_multiple_weighted(self.ctx.get_mut().rng(), num, |(_, cap)| *cap)
+				.expect("we have some species")
+				.map(|(id, _)| *id)
+				.collect();
 			let mut ctx = self.ctx.borrow_mut();
-			let num = self.params.pop_size - count;
-			log::debug!(
-				"Total capacity {count} less than pop size {}! Adding {num} individuals.",
-				self.params.pop_size
-			);
-			for _ in 0..num {
-				let s = *priority
-					.choose(ctx.rng())
-					.expect("some species were underrepresented"); // NOTE: i think in theory this could fail, hmm.
-				ctx[s].capacity += 1;
-				count += 1;
-			} // randomly increment underrepresented species
+			for id in ids {
+				ctx[id].capacity -= 1;
+			}
+			count -= num;
 		}
 		debug_assert_eq!(
 			count, self.params.pop_size,
-			"population count should be correct"
+			"total intended capacity should match population size"
 		);
-		// TODO consider possibility of overproducing... maybe just add to/remove from the largest species? would need to weighted sample
 
-		// 5. Prune species with no capacity.
+		// 5. Prune species with no future capacity due to low fitness.
+		let mut num_pruned = 0;
 		self.species.retain(|&specid| {
 			let ctx = self.ctx.borrow();
 			let cap = ctx[specid].capacity;
 			if cap == 0 {
-				log::debug!("Species #{} pruned for 0 capacity.", specid);
+				// log::debug!("Species #{} pruned for 0 capacity.", specid);
 				num_pruned += 1;
 				false
 			} else {
@@ -638,10 +651,11 @@ where
 		});
 
 		log::info!(
-			"Speciated {} individuals into {} species (+{} added, -{} pruned).",
+			"Speciated {} individuals into {} species (+{} added, -{} extinct, -{} pruned).",
 			self.pop.len(),
 			self.species.len(),
 			num_added,
+			num_extinct,
 			num_pruned,
 		);
 	}
