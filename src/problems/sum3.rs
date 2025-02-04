@@ -109,6 +109,10 @@ impl Problem for Sum3 {
 			.sum();
 		passed / (self.tests.len() as f64)
 	}
+
+	fn name(&self) -> &'static str {
+		"sum3"
+	}
 }
 
 impl<'de> Deserialize<'de> for Sum3 {

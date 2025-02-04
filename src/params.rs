@@ -19,42 +19,45 @@ use crate::{
 #[derive(Serialize, Deserialize, Builder, Debug, Clone)]
 #[serde(bound = "
 	G: Default,
-	R: Default,
 	P: Serialize + for<'p> Deserialize<'p>,
 	M: Serialize + for<'m> Deserialize<'m>,
 	S: Serialize + for<'s> Deserialize<'s>,
 ")]
-pub struct GenAlgConfig<G, C, P, R, M, S>
+#[rustfmt::skip]
+pub struct GenAlgConfig<G, C, P, M, S>
 where
 	G: Genome<C>,
 	C: AsContext,
-	R: Results,
 	M: Mutator<G, C>,
 	S: Selector<G, C>,
 {
 	pub problem: P,
 	pub params: GenAlgParams<G, C, M, S>,
 
-	/// Skipped when serializing, so you must build yourself
-	#[serde(skip)]
-	pub results: R,
+	// /// Skipped when serializing, so you must build yourself
+	// #[serde(skip)]
+	// pub results: R,
+	// ^ unused rn, so leave out for simplicity.
+	// TODO add ResultsParams
 
 	/// Enclosing output directory, containing this config (serialized as `config.toml`) and
 	/// other logs.
 	#[serde(skip)]
 	pub output_dir: String,
 
-	/// Name of csv file storing genome records. Defaults to `data.csv`. Will be found inside
-	/// the output directory.
-	#[serde(skip_serializing, default = "default_datafile")]
-	#[builder(default = default_datafile())]
-	pub datafile: String,
+	// /// Name of csv file storing genome records. Defaults to `data.csv`. Will be found inside
+	// /// the output directory.
+	// #[serde(skip_serializing, default = "default_datafile")]
+	// #[builder(default = default_datafile())]
+	// pub datafile: String,
+	// TODO put in ResultsParams
 
-	/// Name of json file storing results. Defaults to `results.json`. Will be found inside the
-	/// output directory.
-	#[serde(skip_serializing, default = "default_resultsfile")]
-	#[builder(default = default_resultsfile())]
-	pub resultsfile: String,
+	// /// Name of json file storing results. Defaults to `results.json`. Will be found inside the
+	// /// output directory.
+	// #[serde(skip_serializing, default = "default_resultsfile")]
+	// #[builder(default = default_resultsfile())]
+	// pub resultsfile: String,
+	// TODO put in ResultsParams
 }
 
 pub(crate) fn default_datafile() -> String {

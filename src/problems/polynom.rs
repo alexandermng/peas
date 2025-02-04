@@ -80,6 +80,10 @@ impl Problem for Polynom<2> {
 			.sum();
 		passed / (self.tests.len() as f64)
 	}
+
+	fn name(&self) -> &'static str {
+		"poly2"
+	}
 }
 
 impl<'de> Deserialize<'de> for Polynom<2> {

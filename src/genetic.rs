@@ -5,6 +5,7 @@ use std::{
 	collections::HashSet,
 	fmt::Debug,
 	marker::PhantomData,
+	path::Path,
 };
 
 use rand::Rng;
@@ -133,8 +134,8 @@ pub trait AsContext {
 // 	}
 // }
 
-/// Aggregates any results from the run. Define hooks to record data.
-pub trait Results: Serialize {
+/// Aggregates results from the run. Define hooks to record data.
+pub trait Results {
 	type Genome: Genome<Self::Ctx>;
 	type Ctx: AsContext;
 
@@ -147,8 +148,8 @@ pub trait Results: Serialize {
 	/// Called upon the algorithm hitting its stop condition. Not called when algorithm completes specified generations.
 	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {}
 
-	/// Finalize results and save to files.
-	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {}
+	/// Finalize results and write to files. `outdir` should contain any artefacts.
+	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>], outdir: &Path) {}
 }
 
 // /// Default impl for Results. See trait-level docs.

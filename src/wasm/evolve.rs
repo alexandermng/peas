@@ -8,6 +8,7 @@ use std::{
 	marker::PhantomData,
 	mem,
 	ops::{Index, IndexMut, Range},
+	path::{Path, PathBuf},
 	time::Instant,
 };
 
@@ -270,28 +271,30 @@ impl IndexMut<&WasmSpeciesId> for Context {
 }
 
 #[derive(Default, Debug, Serialize, Clone)]
-pub struct WasmGenAlgResults {
-	pub outdir: String, // results log directory (this enclosing directory)
-	pub resultsfile: Option<String>, // json results (this file name)
+pub struct DefaultWasmGenAlgResults {
+	// pub configfile: Option<String>, // the config which this ran from
+	#[serde(skip)]
+	pub resultsfile: Option<String>, // this results.json file
 	pub datafile: Option<String>, // collated gene data csv
-	pub success: bool,  // whether it found a solution
-	pub num_generations: usize, // how many generations it ran for
-	pub total_time: f64, // total time of run, in seconds
-	pub max_fitnesses: Vec<f64>, // top fitness for each generation
-	pub avg_fitnesses: Vec<f64>, // mean fitness for each generation
-	pub times: Vec<f64>, // evaluation times for each generation, in seconds
+	pub success: bool,            // whether it found a solution
+	pub num_generations: usize,   // how many generations it ran for
+	pub total_time: f64,          // total time of run, in seconds
+	pub max_fitnesses: Vec<f64>,  // top fitness for each generation
+	pub avg_fitnesses: Vec<f64>,  // mean fitness for each generation
+	pub times: Vec<f64>,          // evaluation times for each generation, in seconds
+
+	#[serde(skip)]
+	pub hall_of_fame: Vec<WasmGenomeId>, // best genomes per generation
 
 	#[serde(skip)]
 	records: Vec<WasmGenomeRecord>, // genome records, saved to datafile
 }
 
-impl Results for WasmGenAlgResults {
+impl Results for DefaultWasmGenAlgResults {
 	type Ctx = Context;
 	type Genome = WasmGenome;
 
 	fn initialize(&mut self, ctx: &mut Self::Ctx) {
-		fs::create_dir(&self.outdir).unwrap();
-
 		ctx.start_time = Instant::now();
 		ctx.latest_time = Instant::now();
 	}
@@ -326,9 +329,7 @@ impl Results for WasmGenAlgResults {
 				ctx[p].species.expect("has species")
 			);
 		}
-		let filename = format!("{}/gen_{}.wasm", self.outdir, ctx.generation);
-		let topguy = ctx[pop[0]].emit();
-		fs::write(filename, topguy);
+		self.hall_of_fame.push(pop[0]);
 
 		// Update Timing
 		ctx.latest_time = Instant::now();
@@ -338,13 +339,13 @@ impl Results for WasmGenAlgResults {
 		self.success = true;
 	}
 
-	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {
+	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>], outdir: &Path) {
 		self.total_time = ctx.start_time.elapsed().as_secs_f64();
 		self.num_generations = ctx.generation + 1; //HARDCODED TODO
 
 		// data.csv
 		if let Some(datafile) = &self.datafile {
-			let csvfile = format!("{}/{}", self.outdir, datafile);
+			let csvfile = outdir.join(datafile);
 			let mut wtr = Writer::from_path(csvfile).unwrap();
 			for rec in &self.records {
 				wtr.serialize(rec);
@@ -352,18 +353,24 @@ impl Results for WasmGenAlgResults {
 			wtr.flush().unwrap();
 		}
 
+		// hall of fame
+		for &id in &self.hall_of_fame {
+			let filename = outdir.join(format!("hof_{id}.wasm"));
+			fs::write(filename, ctx[id].emit());
+		}
+
 		// results.json
 		if let Some(resultsfile) = &self.resultsfile {
-			let resultsfile = format!("{}/{}", self.outdir, resultsfile);
+			let resultsfile = outdir.join(resultsfile);
 			let results = serde_json::to_string_pretty(&self).expect("results should serialize");
 			fs::write(resultsfile, results);
 		}
 	}
 }
 
-pub type WasmGenAlgConfig<M, S> =
-	GenAlgConfig<WasmGenome, Context, ProblemSet, WasmGenAlgResults, M, S>;
+pub type WasmGenAlgConfig<M, S> = GenAlgConfig<WasmGenome, Context, ProblemSet, M, S>;
 pub type WasmGenAlgParams<M, S> = GenAlgParams<WasmGenome, Context, M, S>;
+pub type WasmGenAlgResults = Box<dyn Results<Genome = WasmGenome, Ctx = Context>>;
 
 /// A genetic algorithm for synthesizing WebAssembly modules to solve a problem. The problem must specify
 /// a fitness function. Parametrized across the problem, the mutation type, and the selection type.
@@ -376,15 +383,16 @@ where
 	// Parameters
 	pub problem: P,
 	pub params: WasmGenAlgParams<M, S>,
-	pub results: WasmGenAlgResults, // TODO later make generic over any R
+	pub results: Vec<WasmGenAlgResults>,
 
 	mutators: Vec<M>,                                   // copied from params
 	selector: S,                                        // copied from params
 	init_genome: WasmGenome,                            // copied from params
 	stop_cond: Box<dyn Predicate<WasmGenome, Context>>, // TODO... idk fix
 
-	seed: u64,      // copied from params
-	outdir: String, // copied from config, or default
+	seed: u64,       // copied from params
+	outdir: PathBuf, // copied from config, or default
+	// resultsfile: String, // copied from config, or default
 
 	// Runtime use
 	engine: Engine,
@@ -393,6 +401,7 @@ where
 	species: Vec<WasmSpeciesId>, // current active species
 }
 
+// TODO refactor this mess entirely. it's horrendous.
 impl<P, M, S> Configurable<WasmGenAlgConfig<M, S>> for WasmGenAlg<P, M, S>
 where
 	P: Problem + Sync + Clone,
@@ -405,14 +414,14 @@ where
 		let WasmGenAlgConfig {
 			problem,
 			params,
-			mut results,
+			// mut results, // was unused, add back in with ResultsParams of some sort
 			output_dir,
-			datafile,
-			resultsfile,
+			// datafile,
+			// resultsfile,
 		} = config;
-		results.outdir = output_dir; // pull from config
-		results.datafile = Some(datafile);
-		results.resultsfile = Some(resultsfile);
+		let mut results = DefaultWasmGenAlgResults::default();
+		results.datafile = Some(params::default_datafile());
+		results.resultsfile = Some(params::default_resultsfile());
 
 		match problem {
 			ProblemSet::Sum3(p) => Box::new(WasmGenAlg::new(p, params, results)),
@@ -426,16 +435,16 @@ where
 		WasmGenAlgConfig {
 			problem,
 			params: self.params.clone(),
-			results: self.results.clone(),
-			output_dir: self.results.outdir.clone(),
-			datafile: self.results.datafile.clone().unwrap_or_default(),
-			resultsfile: self.results.resultsfile.clone().unwrap_or_default(),
+			// results: self.results.clone(),
+			output_dir: self.outdir.to_string_lossy().to_string(),
+			// datafile: self.results.datafile.clone().unwrap_or_default(),
+			// resultsfile: self.results.resultsfile.clone().unwrap_or_default(),
 		}
 		// clone for simplicity... can fix later
 	}
 
 	fn log_config(&mut self) {
-		let configfile = format!("{}/config.toml", &self.outdir);
+		let configfile = self.outdir.join("config.toml");
 		let config = self.gen_config();
 		let config = toml::to_string(&config).expect("config should serialize");
 		fs::write(configfile, config);
@@ -451,7 +460,11 @@ where
 	P::Out: WasmResults,
 {
 	/// Create a new WasmGenAlg based on the given problem, parameters, and desired results.
-	pub fn new(problem: P, params: WasmGenAlgParams<M, S>, results: WasmGenAlgResults) -> Self {
+	pub fn new(
+		problem: P,
+		params: WasmGenAlgParams<M, S>,
+		results: DefaultWasmGenAlgResults,
+	) -> Self {
 		let size = params.pop_size;
 		let seed: u64 = params.seed.into();
 		let mutators = params.mutators.clone();
@@ -463,15 +476,13 @@ where
 			}),
 			None => Box::new(|_: &mut Context, _: &[WasmGenomeId]| false),
 		};
-		let outdir = results.outdir.clone(); // copy from results param
-		let datafile = results
-			.datafile
-			.clone()
-			.unwrap_or_else(params::default_datafile);
-		let resultsfile = results
-			.resultsfile
-			.clone()
-			.unwrap_or_else(params::default_resultsfile);
+		let results: Vec<WasmGenAlgResults> = vec![Box::new(results)];
+		let outdir = {
+			let mut p = PathBuf::from("data");
+			p.push(problem.name());
+			p.push(format!("trial_{}", seed));
+			p
+		};
 
 		WasmGenAlg {
 			problem,
@@ -484,6 +495,7 @@ where
 			stop_cond,
 			seed,
 			outdir,
+			// resultsfile: params::default_resultsfile(),
 
 			// Runtime use
 			engine: Engine::default(),
@@ -491,6 +503,11 @@ where
 			pop: Vec::with_capacity(size),
 			species: Vec::new(),
 		}
+	}
+
+	/// Add another results object before running.
+	pub fn register_results(&mut self, added_results: WasmGenAlgResults) {
+		self.results.push(added_results);
 	}
 }
 
@@ -514,7 +531,7 @@ where
 			let membs = {
 				let mut ctx = self.ctx.borrow_mut();
 				mem::take(&mut ctx[specid].members) // clears members from species
-			};
+			}; // TODO refactor into species method
 			let rep = *membs
 				.choose(self.ctx.get_mut().rng())
 				.expect("non-empty species");
@@ -676,7 +693,7 @@ where
 	fn run(&mut self) {
 		log::info!("Beginning GA trial with seed {}", self.seed);
 
-		self.results.initialize(self.ctx.get_mut());
+		fs::create_dir_all(&self.outdir).unwrap();
 		// config.toml
 		self.log_config();
 
@@ -705,9 +722,15 @@ where
 			);
 		}
 
+		for r in &mut self.results {
+			r.initialize(self.ctx.get_mut());
+		}
+
 		while self.epoch() {}
 
-		self.results.finalize(self.ctx.get_mut(), &self.pop);
+		for r in &mut self.results {
+			r.finalize(self.ctx.get_mut(), &self.pop, &self.outdir);
+		}
 	}
 
 	fn epoch(&mut self) -> bool {
@@ -888,9 +911,9 @@ where
 		{
 			let mut ctx = self.ctx.borrow_mut();
 			log::info!(
-				"Created generation {} (size {}). {} new innovations; {} total innovations.",
+				"Created generation {} ({} species). {} new innovations; {} total innovations.",
 				ctx.generation,
-				self.params.pop_size,
+				self.species.len(),
 				ctx.cur_innovs.len(),
 				ctx.innov_cnt,
 			);
@@ -915,20 +938,22 @@ where
 			.sort_unstable_by(|a, b| f64::partial_cmp(&ctx[b].fitness, &ctx[a].fitness).unwrap());
 		let pop = &self.pop[..]; // read-only, guaranteed for hooks to be sorted by raw fitness
 
-		self.results.record_generation(&mut ctx, pop);
+		for r in &mut self.results {
+			r.record_generation(&mut ctx, pop);
+		}
 
 		// Test stop condition
 		if self.stop_cond.test(&mut ctx, pop) {
 			log::info!(
 				"Stop condition met, exiting. Results are in ./{}",
-				self.outdir
+				self.outdir.to_string_lossy()
 			);
 			return false;
 		} else if ctx.generation >= self.params.num_generations {
 			log::info!(
 				"Completed {} generations. Results are in ./{}",
 				ctx.generation,
-				self.outdir
+				self.outdir.to_string_lossy()
 			);
 			return false;
 		}

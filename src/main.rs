@@ -128,8 +128,8 @@ fn main() -> eyre::Result<()> {
 		_ => return Err(eyre!("Unknown problem")),
 	};
 	let muts: Vec<WasmMutationSet> = vec![
-		AddOperation::from_rate(0.2).into(), // local variable
-		ChangeRoot::from_rate(0.3).into(),   // consts, locals, push onto stack
+		AddOperation::from_rate(0.1).into(), // local variable
+		ChangeRoot::from_rate(0.4).into(),   // consts, locals, push onto stack
 	];
 	let seed = args.seed.unwrap_or_else(|| thread_rng().gen());
 	let params = GenAlgParams::builder()
@@ -139,19 +139,17 @@ fn main() -> eyre::Result<()> {
 		.max_fitness(1.0)
 		.mutators(muts)
 		.mutation_rate(1.0)
-		.selector(TournamentSelection::new(0.6, 3, 0.9, false)) // can do real tournament selection when selection is fixed
+		.selector(TournamentSelection::new(0.6, 2, 0.9, false)) // can do real tournament selection when selection is fixed
 		.speciation(SpeciesParams {
 			enabled: true,
-			threshold: 0.7,
+			threshold: 1.2,
 			fitness_sharing: true,
 		})
 		.init_genome(init)
-		.elitism_rate(0.05)
-		.crossover_rate(0.95)
+		.elitism_rate(0.04)
+		.crossover_rate(0.8)
 		.build();
-	let mut results = WasmGenAlgResults::default();
-	results.outdir = format!("data/trial_{seed}.log");
-	results.resultsfile = Some("results.json".into());
+	let mut results = DefaultWasmGenAlgResults::default();
 	results.datafile = Some("data.csv".into()); // TODO deduplicate much of this by just loading a default config and merging in passed args
 	match problem {
 		//.... hey. it works.

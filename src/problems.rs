@@ -21,6 +21,8 @@ pub trait Problem {
 	fn fitness(&self, soln: impl Solution<Self>) -> f64
 	where
 		Self: Sized;
+
+	fn name(&self) -> &'static str;
 }
 
 /// A solution to a given problem.
@@ -54,6 +56,8 @@ pub enum ProblemSet {
 	Sum4(Sum4),
 	Polynom2(Polynom<2>),
 }
+
+// TODO serialize using tag = Problem::name()
 
 impl From<Sum3> for ProblemSet {
 	fn from(value: Sum3) -> Self {
