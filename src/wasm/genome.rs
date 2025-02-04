@@ -164,7 +164,7 @@ pub struct WasmGenome {
 	/// the species this genome belongs to
 	pub species: Option<WasmSpeciesId>,
 	/// the generation this was created (+1 from its parents in crossover)
-	pub generation: usize,
+	pub generation: usize, // TODO check where this is set... make sure it aligns with actual generation (since it doesn't get incremented in mutation)
 
 	pub params: Vec<StackValType>,
 	pub result: Vec<StackValType>,

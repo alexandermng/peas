@@ -150,6 +150,7 @@ fn main() -> eyre::Result<()> {
 		.crossover_rate(0.8)
 		.build();
 	let mut results = DefaultWasmGenAlgResults::default();
+	results.resultsfile = Some("results.json".into());
 	results.datafile = Some("data.csv".into()); // TODO deduplicate much of this by just loading a default config and merging in passed args
 	match problem {
 		//.... hey. it works.

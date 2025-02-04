@@ -343,7 +343,7 @@ impl Results for DefaultWasmGenAlgResults {
 
 	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>], outdir: &Path) {
 		self.total_time = ctx.start_time.elapsed().as_secs_f64();
-		self.num_generations = ctx.generation + 1; //HARDCODED TODO
+		self.num_generations = ctx.generation + 1; // Because generations are 0-indexed.
 
 		// data.csv
 		if let Some(datafile) = &self.datafile {
@@ -356,8 +356,8 @@ impl Results for DefaultWasmGenAlgResults {
 		}
 
 		// hall of fame
-		for &id in &self.hall_of_fame {
-			let filename = outdir.join(format!("hof_{id}.wasm"));
+		for (eration, &id) in self.hall_of_fame.iter().enumerate() {
+			let filename = outdir.join(format!("hof_gen{eration}_{id}.wasm"));
 			fs::write(filename, ctx[id].emit());
 		}
 
@@ -950,7 +950,10 @@ where
 				"Stop condition met, exiting. Results are in ./{}",
 				self.outdir.to_string_lossy()
 			);
-			return false;
+			for r in &mut self.results {
+				r.record_success(&mut ctx, pop);
+			}
+			return false; // exit
 		} else if ctx.generation >= self.params.num_generations {
 			log::info!(
 				"Completed {} generations. Results are in ./{}",
@@ -968,7 +971,7 @@ where
 		self.selector.vary_params(&mut ctx, pop);
 		// self.crossover.vary_params(&mut ctx, pop);
 
-		true
+		true // continue!
 	}
 
 	fn evaluate(&mut self) {
