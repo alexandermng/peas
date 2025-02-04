@@ -555,7 +555,7 @@ where
 				let genom = &ctx[indiv];
 				let spec = &ctx[genom.species.expect("species assigned")];
 				let adj = spec.adjusted_fitness(genom.fitness);
-				ctx[indiv].fitness = adj;
+				ctx[indiv].adjusted_fitness = Some(adj);
 			}
 		}
 
@@ -573,14 +573,18 @@ where
 			}
 		});
 
-		// 5. For each species, set capacities for next generation based on proportion of fitness. Ensure population count.
-		let total_fitness: f64 = self.pop.iter().map(|&g| self.ctx.borrow()[g].fitness).sum();
+		// 5. For each species, set capacities for next generation based on proportion of adjusted fitness. Ensure population count.
+		let total_fitness: f64 = self
+			.pop
+			.iter()
+			.map(|&g| self.ctx.borrow()[g].fitness())
+			.sum();
 		let mut count = 0;
 		let mut priority = Vec::new(); // underrepresented species (have fitness but no capacity because they were too large)
 		for &specid in &self.species {
 			let f: f64 = {
 				let ctx = self.ctx.borrow();
-				ctx[specid].members.iter().map(|&g| ctx[g].fitness).sum()
+				ctx[specid].members.iter().map(|&g| ctx[g].fitness()).sum()
 			};
 			let cap = (f / total_fitness * self.params.pop_size as f64) as usize;
 			if cap == 0 && f > 0.0 {
@@ -895,7 +899,7 @@ where
 		let mut ctx = self.ctx.borrow_mut();
 		self.pop
 			.sort_unstable_by(|a, b| f64::partial_cmp(&ctx[b].fitness, &ctx[a].fitness).unwrap());
-		let pop = &self.pop[..]; // read-only, guaranteed for hooks to be sorted by fitness
+		let pop = &self.pop[..]; // read-only, guaranteed for hooks to be sorted by raw fitness
 
 		self.results.record_generation(&mut ctx, pop);
 

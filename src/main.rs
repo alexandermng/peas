@@ -142,7 +142,7 @@ fn main() -> eyre::Result<()> {
 		.selector(TournamentSelection::new(0.6, 3, 0.9, false)) // can do real tournament selection when selection is fixed
 		.speciation(SpeciesParams {
 			enabled: true,
-			threshold: 0.8,
+			threshold: 0.7,
 			fitness_sharing: true,
 		})
 		.init_genome(init)

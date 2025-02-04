@@ -129,14 +129,14 @@ impl<'a> WasmGene<'a> {
 	}
 }
 
-impl<'a> PartialEq for WasmGene<'a> {
+impl PartialEq for WasmGene<'_> {
 	fn eq(&self, other: &Self) -> bool {
 		self.marker == other.marker
 	}
 }
-impl<'a> Eq for WasmGene<'a> {}
+impl Eq for WasmGene<'_> {}
 
-impl<'a> Debug for WasmGene<'a> {
+impl Debug for WasmGene<'_> {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "Gene[{}]:", self.marker)?;
 		self.instr.fmt(f)
@@ -157,9 +157,14 @@ pub type WasmGenomeId = Id<WasmGenome>;
 #[derive(Clone, Debug, Default)]
 pub struct WasmGenome {
 	pub genes: Vec<WasmGene<'static>>,
-	pub fitness: f64,                   // the fitness of the resulting Agent
-	pub species: Option<WasmSpeciesId>, // the species this genome belongs to
-	pub generation: usize,              // the generation this was created (+1 from its parents)
+	/// the raw fitness of the resulting Agent
+	pub fitness: f64,
+	/// the fitness adjusted for speciated fitness sharing
+	pub adjusted_fitness: Option<f64>,
+	/// the species this genome belongs to
+	pub species: Option<WasmSpeciesId>,
+	/// the generation this was created (+1 from its parents in crossover)
+	pub generation: usize,
 
 	pub params: Vec<StackValType>,
 	pub result: Vec<StackValType>,
@@ -175,6 +180,7 @@ impl WasmGenome {
 		WasmGenome {
 			genes: Vec::new(),
 			fitness: 0.0,
+			adjusted_fitness: None,
 			species: None,
 			generation,
 
@@ -228,6 +234,7 @@ impl WasmGenome {
 		Ok(WasmGenome {
 			genes,
 			fitness: 0.0,
+			adjusted_fitness: None,
 			species: None,
 			generation: 0,
 			params,
@@ -399,7 +406,8 @@ const DIST_COEFF_DISJOINT: f64 = 0.5;
 impl Genome<Context> for WasmGenome {
 	fn dist(&self, other: &Self) -> f64 {
 		let diff = self.diff(other);
-		let n = cmp::max(self.len(), other.len()) as f64; // max num genes
+		let n = cmp::max(self.len(), other.len()); // max num genes
+		let n = if n < 20 { 1.0 } else { n as f64 }; // don't normalize small genes
 		let (num_excess, num_disjoint) =
 			diff.into_iter()
 				.fold((0, 0), |(acc_e, acc_d), gd| match gd {
@@ -418,7 +426,11 @@ impl Genome<Context> for WasmGenome {
 	}
 
 	fn fitness(&self) -> f64 {
-		self.fitness
+		if let Some(adjusted) = self.adjusted_fitness {
+			adjusted
+		} else {
+			self.fitness
+		}
 	}
 
 	fn reproduce(&self, other: &Self, mut ctx: &mut Context) -> Self {
@@ -447,6 +459,7 @@ impl Genome<Context> for WasmGenome {
 		WasmGenome {
 			genes: child,
 			fitness: 0.0,
+			adjusted_fitness: None,
 			generation: self.generation + 1,
 			species: None, // assigned later
 			params: par_a.params.clone(),
