@@ -63,15 +63,16 @@ def main(args):
     errorcounter = 0
     trials = []
 
+    dir = args.dir if args.dir else os.path.join("data", args.problem)
     try:
-        directory = os.fsencode("data/")
-        #print("here0")
+        directory = dir
+        # print("here0")
         for subdir in os.listdir(directory):
             print(os.fsdecode(subdir))
-            for file in os.listdir(os.fsdecode(directory) + os.fsdecode(subdir)):
+            for file in os.listdir(os.fsdecode(directory) + os.fsdecode(subdir)):  # TODO clean this up using some path.join, this is ugly
                 filename = os.fsdecode(file)
-                #print("here2")
-                if filename.endswith(".json"):
+                # print("here2")
+                if filename.endswith(".json"):  # TODO make check for "results.json"
                     jsonFlag = True
             if jsonFlag:
                 trials.append(os.fsdecode(directory) + os.fsdecode(subdir))
@@ -85,6 +86,7 @@ def main(args):
     fig = plot_trials(trials)
 
     # Save and show the plot
+    # TODO check if file exists and don't overwrite, ask user for confirm
     fig.savefig(args.output)
     print(f"Plot saved to '{args.output}'.")
     print(f"number of error runs: {errorcounter}")
@@ -95,8 +97,8 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-m', '--manifest', action='store',
-                        default="data/manifest.json", help="Manifest file")
+    parser.add_argument('-d', '--dir', action='store',
+                        default="data", help="Data directory")
     parser.add_argument('-p', '--problem', action='store',
                         default="sum3", help="Problem to check")  # make required?
     parser.add_argument('-o', '--output', action='store',
