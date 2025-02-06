@@ -506,11 +506,6 @@ where
 			species: Vec::new(),
 		}
 	}
-
-	/// Add another results object before running.
-	pub fn register_results(&mut self, added_results: WasmGenAlgResults) {
-		self.results.push(added_results);
-	}
 }
 
 impl<P, M, S> WasmGenAlg<P, M, S>
@@ -521,6 +516,21 @@ where
 	P::In: WasmParams,
 	P::Out: WasmResults,
 {
+	/// Add another results object before running.
+	pub fn register_results(&mut self, added_results: WasmGenAlgResults) {
+		self.results.push(added_results);
+	}
+
+	/// Get the runtime context
+	pub fn context(&self) -> std::cell::Ref<Context> {
+		self.ctx.borrow()
+	}
+
+	/// Get the runtime context mutably
+	pub fn context_mut(&self) -> std::cell::RefMut<Context> {
+		self.ctx.borrow_mut()
+	}
+
 	/// Distribute new population into species, after they've been evaluated, at the end of every generation.
 	/// This should happen BEFORE selection/reproduction in the next generation, because it may affect the
 	/// fitness of its members.
@@ -531,7 +541,7 @@ where
 		let mut map = HashMap::<WasmGenomeId, WasmSpeciesId>::new();
 		for &specid in &self.species {
 			let membs = {
-				let mut ctx = self.ctx.borrow_mut();
+				let mut ctx = self.context_mut();
 				mem::take(&mut ctx[specid].members) // clears members from species
 			}; // TODO refactor into species method
 			let rep = *membs

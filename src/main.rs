@@ -95,8 +95,9 @@ fn main() -> eyre::Result<()> {
 	}
 
 	let problem = args.problem.unwrap_or_else(|| String::from("sum3"));
+	let num_tests = 100; // TODO put in args. or even better, put in ProblemParams
 	let (problem, init) = match &*problem {
-		"sum3" => (ProblemSet::Sum3(Sum3::new(1000, 0.1, 0.2)), {
+		"sum3" => (ProblemSet::Sum3(Sum3::new(num_tests, 0.1, 0.2)), {
 			let params = &[StackValType::I32, StackValType::I32, StackValType::I32];
 			let result = &[StackValType::I32];
 			let mut wg = WasmGenome::new(0, params, result);
@@ -104,7 +105,7 @@ fn main() -> eyre::Result<()> {
 				.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
 			wg
 		}),
-		"sum4" => (ProblemSet::Sum4(Sum4::new(1000, 0.02, 0.04, 0.08)), {
+		"sum4" => (ProblemSet::Sum4(Sum4::new(num_tests, 0.02, 0.04, 0.08)), {
 			let params = &[
 				StackValType::I32,
 				StackValType::I32,
@@ -117,7 +118,7 @@ fn main() -> eyre::Result<()> {
 				.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
 			wg
 		}),
-		"polynom" => (ProblemSet::Polynom2(Polynom::new(1000, 0.3)), {
+		"polynom" => (ProblemSet::Polynom2(Polynom::new(num_tests, 0.3)), {
 			let params = &[StackValType::I32, StackValType::I32];
 			let result = &[StackValType::I32];
 			let mut wg = WasmGenome::new(0, params, result);
@@ -142,11 +143,11 @@ fn main() -> eyre::Result<()> {
 		.selector(TournamentSelection::new(0.6, 2, 0.9, false)) // can do real tournament selection when selection is fixed
 		.speciation(SpeciesParams {
 			enabled: true,
-			threshold: 1.2,
+			threshold: 2.0,
 			fitness_sharing: true,
 		})
 		.init_genome(init)
-		.elitism_rate(0.04)
+		.elitism_rate(0.05)
 		.crossover_rate(0.8)
 		.build();
 	let mut results = DefaultWasmGenAlgResults::default();

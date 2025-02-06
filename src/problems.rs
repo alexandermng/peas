@@ -23,6 +23,8 @@ pub trait Problem {
 		Self: Sized;
 
 	fn name(&self) -> &'static str;
+
+	// TODO: vary_params somewhere?
 }
 
 /// A solution to a given problem.
