@@ -620,7 +620,9 @@ where
 				let ctx = self.ctx.borrow();
 				ctx[specid].members.iter().map(|&g| ctx[g].fitness()).sum()
 			};
-			let cap = if f == 0.0 {
+			let cap = if total_fitness == 0.0 {
+				(self.params.pop_size as f64 / self.species.len() as f64).ceil() as usize // special case: if no total fitness, everyone is equally bad, so distribute equally among all species
+			} else if f == 0.0 {
 				0
 			} else {
 				(f / total_fitness * self.params.pop_size as f64).ceil() as usize
