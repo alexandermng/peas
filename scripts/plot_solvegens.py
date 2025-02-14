@@ -12,12 +12,14 @@ def plot_trials(trials: list) -> Figure:
     fig, ax = plt.subplots(figsize=(10, 6))
 
     solvegens = [get_num_gens(t) for t in trials]
+    max_gens = max(solvegens)
+    num_runs = len(trials)
 
     bins = 20
     ax.hist(solvegens, bins=bins, color="lightblue", edgecolor="black")
 
-    ax.set_title("Histograms of Generations per Trial")
-    ax.set_xlabel("Number of Generations")
+    ax.set_title(f"Generations per Trial (n={num_runs} trials)")
+    ax.set_xlabel(f"Number of Generations (max {max_gens})")
     ax.set_ylabel("Frequency")
     ax.legend()
     ax.grid(True)
