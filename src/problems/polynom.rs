@@ -22,7 +22,7 @@ pub struct Polynom<const N: usize = 2> {
 impl Polynom<2> {
 	/// Desired expression / solution
 	pub fn expr(x: i32, y: i32) -> i32 {
-		(x * x) + (x * y) + (y * y)
+		(x * x) + 2 * (x * y) + (y * y)
 	}
 
 	pub fn new(num: usize, partial1_rate: f64) -> Self {

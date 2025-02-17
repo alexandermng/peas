@@ -140,7 +140,7 @@ fn main() -> eyre::Result<()> {
 		.max_fitness(1.0)
 		.mutators(muts)
 		.mutation_rate(1.0)
-		.selector(TournamentSelection::new(0.6, 2, 0.9, false)) // can do real tournament selection when selection is fixed
+		.selector(TournamentSelection::new(0.6, 2, 0.9, true)) // can do real tournament selection when selection is fixed
 		.speciation(SpeciesParams {
 			enabled: true,
 			threshold: 2.0,

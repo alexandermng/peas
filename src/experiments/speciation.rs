@@ -1,0 +1,270 @@
+//! Test the effect of speciation.
+
+use std::{
+	fs::{self, File},
+	iter,
+	path::PathBuf,
+	sync::{
+		atomic::{AtomicU32, AtomicUsize, Ordering},
+		RwLock,
+	},
+};
+
+use polars::prelude::*;
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use serde::Serialize;
+
+use crate::{
+	genetic::{GenAlg, Results},
+	params::{GenAlgParams, SpeciesParams},
+	problems::{ProblemSet, Sum3},
+	selection::TournamentSelection,
+	wasm::{
+		mutations::{AddOperation, ChangeRoot, WasmMutationSet},
+		species::WasmSpecies,
+		Context, WasmGenAlg, WasmGenome,
+	},
+	Id,
+};
+
+use super::Experiment;
+
+/// Tests performance based on the compatibility threshold in speciation. The control is with it disabled.
+/// Aggregates data about the number of species per generation
+pub struct SpeciationExperiment {
+	/// which problem to be acting on
+	pub problem: ProblemSet,
+
+	/// How many runs to run for each configuration
+	pub num_runs_per: usize,
+
+	/// Configurations of the intended parameter to vary, in this case the species paramaters (in particular, threshold).
+	pub configurations: Vec<SpeciesParams>,
+
+	// trials: Vec<<Self as Experiment>::GA>,
+	outdir: PathBuf,
+
+	/// Collected data, if it has been run already.
+	data: Option<DataFrame>,
+}
+
+/// Overall results for the entire experiment
+#[derive(Debug, Default, Clone)]
+pub struct SpeciationExperimentResults {
+	pub data: DataFrame,
+}
+
+/// Results for a single trial/run
+#[derive(Clone)]
+pub struct SpeciationTrialResults {
+	/// Unique ID of the trial
+	pub trial_id: usize,
+
+	/// Number of generations at completion
+	pub num_generations: usize,
+
+	/// Number of species, by generation
+	pub num_species: Vec<u32>,
+	/// Average fitness, by generation
+	pub avg_fitnesses: Vec<f64>,
+	/// Max fitness, by generation
+	pub max_fitnesses: Vec<f64>,
+
+	experiment_data: Arc<RwLock<SpeciationExperimentResults>>,
+}
+
+impl SpeciationExperiment {
+	pub fn new(
+		problem: ProblemSet,
+		num_runs_per: usize,
+		configurations: Vec<SpeciesParams>,
+		outdir: PathBuf,
+	) -> Self {
+		Self {
+			problem,
+			num_runs_per,
+			configurations,
+			// trials: Vec::new(),
+			outdir,
+			data: None,
+		}
+	}
+}
+
+impl Default for SpeciationExperiment {
+	fn default() -> Self {
+		let mut outdir = PathBuf::new();
+		outdir.push("data");
+		outdir.push("speciation"); // experiment name
+		let mut configurations = vec![SpeciesParams {
+			enabled: false,
+			threshold: 0.0,
+			fitness_sharing: true,
+		}];
+		let max_threshold = 5.0;
+		let num_spread = 100; // for linspace
+		configurations.extend(
+			(0..num_spread)
+				.map(|i| max_threshold * (i as f64 / num_spread as f64)) // linspace
+				.map(|threshold| SpeciesParams {
+					enabled: true,
+					threshold,
+					fitness_sharing: true,
+				}),
+		);
+		Self {
+			problem: ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2)),
+			num_runs_per: 100,
+			configurations,
+			outdir,
+			data: None,
+		}
+	}
+}
+
+impl Experiment for SpeciationExperiment {
+	type Genome = WasmGenome;
+	type Ctx = Context;
+	type ProblemSet = ProblemSet;
+	type MutationSet = WasmMutationSet;
+	type SelectorSet = TournamentSelection;
+	type GA = WasmGenAlg<Sum3, Self::MutationSet, Self::SelectorSet>;
+	// TODO ^ fix this. rn hardcoded to sum3.
+
+	fn run(&mut self) {
+		let trial_count = AtomicUsize::new(0);
+		let results = Arc::new(RwLock::new(SpeciationExperimentResults::new()));
+		self.configurations
+			.par_iter() // Lazy
+			.flat_map_iter(|c| iter::repeat_n(c, self.num_runs_per))
+			.map(|c| {
+				let problem = match &self.problem {
+					ProblemSet::Sum3(sum3) => sum3.clone(),
+					_ => unimplemented!(),
+				};
+				let mut params = self.base_params();
+				params.speciation = c.clone();
+				let id = trial_count.fetch_add(1, Ordering::Relaxed);
+				let results = SpeciationTrialResults::new(id, Arc::clone(&results));
+				let ga: Self::GA = WasmGenAlg::new(problem, params, results);
+				ga
+			})
+			.for_each(|mut ga| ga.run()); // Run in parallel!
+		let trial_count = trial_count.load(Ordering::Relaxed);
+		log::info!("Completed {trial_count} trials.");
+		let results = Arc::try_unwrap(results)
+			.expect("should only have one reference at this point")
+			.into_inner()
+			.unwrap();
+		let SpeciationExperimentResults { mut data } = results;
+		data.align_chunks_par(); // due to multiple vstacks
+
+		// TODO: configure output, generate graphs
+		let datafile = self.outdir.join("data.csv");
+		let mut file = File::create(datafile).unwrap();
+		CsvWriter::new(&mut file)
+			.include_header(true)
+			.finish(&mut data)
+			.unwrap();
+
+		self.data = Some(data);
+	}
+
+	fn base_params(
+		&self,
+	) -> GenAlgParams<Self::Genome, Self::Ctx, Self::MutationSet, Self::SelectorSet> {
+		let muts: Vec<WasmMutationSet> = vec![
+			AddOperation::from_rate(0.1).into(), // local variable
+			ChangeRoot::from_rate(0.4).into(),   // consts, locals, push onto stack
+		];
+		let init = self.problem.init_genome();
+		GenAlgParams::builder()
+			.seed(0)
+			.pop_size(100)
+			.num_generations(100)
+			.max_fitness(1.0)
+			.mutators(muts)
+			.mutation_rate(1.0)
+			.selector(TournamentSelection::new(0.6, 2, 0.9, true))
+			.speciation(SpeciesParams {
+				enabled: false,
+				threshold: 0.0,
+				fitness_sharing: false,
+			})
+			.init_genome(init)
+			.elitism_rate(0.05)
+			.crossover_rate(0.8)
+			.build()
+	}
+
+	fn outdir(&self) -> &std::path::Path {
+		&self.outdir
+	}
+}
+
+impl SpeciationExperimentResults {
+	pub fn new() -> Self {
+		todo!()
+	}
+	pub fn report_trial(
+		&mut self,
+		trial_id: u32,
+		threshold: f64,
+		results: &SpeciationTrialResults,
+	) {
+		let mut trial_data = results.to_data();
+		let ids = Series::new("trial_id".into(), vec![trial_id; trial_data.height()]);
+		let thresholds = Series::new("threshold".into(), vec![threshold; trial_data.height()]);
+		trial_data.insert_column(0, ids);
+		// trial_data.insert_column(1, threshold); // TODO figure out how to add. why cant f64?
+
+		self.data.vstack_mut_owned_unchecked(trial_data);
+	}
+}
+
+impl SpeciationTrialResults {
+	pub fn new(trial_id: usize, experiment_data: Arc<RwLock<SpeciationExperimentResults>>) -> Self {
+		Self {
+			trial_id,
+			num_generations: 0,
+			num_species: Vec::new(),
+			avg_fitnesses: Vec::new(),
+			max_fitnesses: Vec::new(),
+			experiment_data,
+		}
+	}
+
+	pub fn to_data(&self) -> DataFrame {
+		let generations: Vec<u32> = (0..(self.num_generations as u32)).collect();
+		DataFrame::new(vec![
+			Column::new("generation".into(), generations),
+			Column::new("num_species".into(), &self.num_species),
+			Column::new("avg_fitness".into(), &self.avg_fitnesses),
+			Column::new("max_fitness".into(), &self.max_fitnesses),
+		])
+		.unwrap()
+	}
+}
+
+impl Results for SpeciationTrialResults {
+	type Genome = WasmGenome;
+	type Ctx = Context;
+
+	fn record_generation(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {
+		self.avg_fitnesses.push(ctx.avg_fitness);
+		self.max_fitnesses.push(ctx.max_fitness);
+	}
+
+	fn record_speciation(&mut self, ctx: &mut Self::Ctx, species: &[Id<WasmSpecies>]) {
+		self.num_species.push(species.len() as u32)
+	}
+
+	fn finalize(
+		&mut self,
+		ctx: &mut Self::Ctx,
+		pop: &[Id<Self::Genome>],
+		outdir: &std::path::Path,
+	) {
+		self.num_generations = ctx.generation + 1; // since 0-indexed
+	}
+}

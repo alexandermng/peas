@@ -1,7 +1,7 @@
 use std::{
 	any::Any,
 	borrow::{Borrow, BorrowMut},
-	cell::RefCell,
+	cell::{RefCell, RefMut},
 	collections::{HashMap, HashSet},
 	fs,
 	hash::{DefaultHasher, Hash, Hasher},
@@ -98,7 +98,7 @@ type InnovKey = MutationLog;
 
 #[derive(Debug)]
 pub struct Context {
-	pub generation: usize, // current generation
+	pub generation: usize, // current generation (0-indexed)
 	pub max_fitness: f64,  // current top fitness
 	pub avg_fitness: f64,  // current mean fitness
 
@@ -372,7 +372,7 @@ impl Results for DefaultWasmGenAlgResults {
 
 pub type WasmGenAlgConfig<M, S> = GenAlgConfig<WasmGenome, Context, ProblemSet, M, S>;
 pub type WasmGenAlgParams<M, S> = GenAlgParams<WasmGenome, Context, M, S>;
-pub type WasmGenAlgResults = Box<dyn Results<Genome = WasmGenome, Ctx = Context>>;
+pub type WasmGenAlgResults = Box<dyn Results<Genome = WasmGenome, Ctx = Context> + Send>;
 
 /// A genetic algorithm for synthesizing WebAssembly modules to solve a problem. The problem must specify
 /// a fitness function. Parametrized across the problem, the mutation type, and the selection type.
@@ -387,10 +387,9 @@ where
 	pub params: WasmGenAlgParams<M, S>,
 	pub results: Vec<WasmGenAlgResults>,
 
-	mutators: Vec<M>,                                   // copied from params
-	selector: S,                                        // copied from params
-	init_genome: WasmGenome,                            // copied from params
-	stop_cond: Box<dyn Predicate<WasmGenome, Context>>, // TODO... idk fix
+	mutators: Vec<M>,        // copied from params
+	selector: S,             // copied from params
+	init_genome: WasmGenome, // copied from params
 
 	seed: u64,       // copied from params
 	outdir: PathBuf, // copied from config, or default
@@ -465,7 +464,7 @@ where
 	pub fn new(
 		problem: P,
 		params: WasmGenAlgParams<M, S>,
-		results: DefaultWasmGenAlgResults,
+		results: impl Results<Genome = WasmGenome, Ctx = Context> + Send + 'static,
 	) -> Self {
 		let size = params.pop_size;
 		let seed: u64 = params.seed.into();
@@ -494,7 +493,6 @@ where
 			mutators,
 			selector,
 			init_genome,
-			stop_cond,
 			seed,
 			outdir,
 			// resultsfile: params::default_resultsfile(),
@@ -955,18 +953,26 @@ where
 		for r in &mut self.results {
 			r.record_generation(&mut ctx, pop);
 		}
+		if self.params.speciation.enabled {
+			for r in &mut self.results {
+				r.record_speciation(&mut ctx, &self.species);
+			}
+		}
 
 		// Test stop condition
-		if self.stop_cond.test(&mut ctx, pop) {
-			log::info!(
-				"Stop condition met, exiting. Results are in ./{}",
-				self.outdir.to_string_lossy()
-			);
-			for r in &mut self.results {
-				r.record_success(&mut ctx, pop);
+		if let &Some(mf) = &self.params.max_fitness {
+			if ctx.max_fitness >= mf {
+				log::info!(
+					"Success achieving max fitness ({mf:.3}). Results are in ./{}",
+					self.outdir.to_string_lossy(),
+				);
+				for r in &mut self.results {
+					r.record_success(&mut ctx, pop);
+				}
+				return false; // exit
 			}
-			return false; // exit
-		} else if ctx.generation >= self.params.num_generations {
+		}
+		if ctx.generation >= self.params.num_generations {
 			log::info!(
 				"Completed {} generations. Results are in ./{}",
 				ctx.generation,

@@ -14,7 +14,7 @@ pub mod wasm {
 	pub use evolve::*;
 	pub use genome::*;
 }
-
+pub mod experiments;
 pub mod problems;
 
 pub mod prelude {

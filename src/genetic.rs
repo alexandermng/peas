@@ -145,6 +145,15 @@ pub trait Results {
 	/// Called once every generation, after evaluation and before crafting of next generation.
 	fn record_generation(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {}
 
+	/// Called once every generation, after evaluation and before crafting of next generation.
+	/// TODO fix by adding a default associated type or smthn
+	fn record_speciation(
+		&mut self,
+		ctx: &mut Self::Ctx,
+		species: &[Id<crate::wasm::species::WasmSpecies>],
+	) {
+	}
+
 	/// Called upon the algorithm hitting its stop condition. Not called when algorithm completes specified generations.
 	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {}
 

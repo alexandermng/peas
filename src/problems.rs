@@ -78,3 +78,42 @@ impl From<Polynom<2>> for ProblemSet {
 		ProblemSet::Polynom2(value)
 	}
 }
+
+// TODO move... idk where.
+use crate::wasm::{InnovNum, StackValType, WasmGene, WasmGenome};
+use wasm_encoder::Instruction;
+impl ProblemSet {
+	pub fn init_genome(&self) -> WasmGenome {
+		match self {
+			ProblemSet::Sum3(sum3) => {
+				let params = &[StackValType::I32, StackValType::I32, StackValType::I32];
+				let result = &[StackValType::I32];
+				let mut wg = WasmGenome::new(0, params, result);
+				wg.genes
+					.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
+				wg
+			}
+			ProblemSet::Sum4(sum4) => {
+				let params = &[
+					StackValType::I32,
+					StackValType::I32,
+					StackValType::I32,
+					StackValType::I32,
+				];
+				let result = &[StackValType::I32];
+				let mut wg = WasmGenome::new(0, params, result);
+				wg.genes
+					.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
+				wg
+			}
+			ProblemSet::Polynom2(polynom) => {
+				let params = &[StackValType::I32, StackValType::I32];
+				let result = &[StackValType::I32];
+				let mut wg = WasmGenome::new(0, params, result);
+				wg.genes
+					.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
+				wg
+			}
+		}
+	}
+}
