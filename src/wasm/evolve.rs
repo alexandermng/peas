@@ -60,18 +60,39 @@ pub struct Agent {
 	pub module: Module,
 	// ^ todo consider access. also starting state to seed Store<_>
 	// pub fitness: f64,
+	is_valid: bool,
 }
 
 impl Agent {
 	fn new(engine: Engine, binary: &[u8]) -> Self {
+		let mut is_valid = true;
 		let module = match Module::from_binary(&engine, binary) {
 			Ok(o) => o,
 			Err(err) => {
-				log::error!("Invalid Agent: {binary:?}");
-				panic!("{err:?}")
+				log::error!("Invalid Agent({binary:?}), {err}");
+				// panic!("{err:?}")
+				is_valid = false;
+				Module::new(
+					// default :/ TODO fixthis
+					&engine,
+					r#"
+				(module
+					(type (;0;) (func (param i32 i32 i32) (result i32)))
+					(func (;0;) (type 0) (param i32 i32 i32) (result i32)
+					i32.const 0
+					)
+					(export "main" (func 0))
+				)
+				"#,
+				)
+				.unwrap()
 			}
 		};
-		Agent { engine, module }
+		Agent {
+			engine,
+			module,
+			is_valid,
+		}
 	}
 }
 
@@ -82,6 +103,9 @@ where
 	P::Out: WasmResults,
 {
 	fn try_exec(&self, args: P::In) -> eyre::Result<P::Out> {
+		if !self.is_valid {
+			return Err(eyre!("invalid module"));
+		}
 		let linker = Linker::new(&self.engine);
 		let mut store = Store::new(&self.engine, ());
 		let instance = linker.instantiate(&mut store, &self.module).unwrap();
@@ -108,8 +132,8 @@ pub struct Context {
 	innov_cnt: InnovNum,                     // innovation number count
 	cur_innovs: HashMap<InnovKey, InnovNum>, // running log of current unique innovations, cleared per-generation.
 
-	start_time: Instant,  // start time of run
-	latest_time: Instant, // time since last generation
+	pub(crate) start_time: Instant,  // start time of run
+	pub(crate) latest_time: Instant, // time since last generation
 }
 
 impl Context {

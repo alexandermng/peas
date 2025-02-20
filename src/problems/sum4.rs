@@ -106,8 +106,12 @@ impl Problem for Sum4 {
 			.tests
 			// .par_iter()
 			.iter()
-			.map(|t| if soln.exec(t.0) == t.1 { 1.0 } else { 0.0 }) // pass test
-			.sum();
+			.try_fold(0.0, |acc, &(args, exp)| match soln.try_exec(args) {
+				Ok(o) if o == exp => Ok(acc + 1.0), // passed test
+				Ok(_) => Ok(acc),                   // no pass
+				Err(_) => Err(0.0),                 // if any invalid, fail early 0 fitness
+			})
+			.unwrap_or(0.0);
 		passed / (self.tests.len() as f64)
 	}
 

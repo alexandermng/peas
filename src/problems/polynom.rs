@@ -71,13 +71,12 @@ impl Problem for Polynom<2> {
 			.tests
 			// .par_iter()
 			.iter()
-			// .map(|&(args, exp)| if soln.exec(args) == exp { 1.0 } else { 0.0 }) // old
-			.map(|&(args, exp)| match soln.try_exec(args.into()) {
-				Ok(res) if res == exp => 1.0,
-				Ok(_) => 0.0,
-				Err(_) => -1.0,
+			.try_fold(0.0, |acc, &(args, exp)| match soln.try_exec(args.into()) {
+				Ok(o) if o == exp => Ok(acc + 1.0), // passed test
+				Ok(_) => Ok(acc),                   // no pass
+				Err(_) => Err(0.0),                 // if any invalid, fail early 0 fitness
 			})
-			.sum();
+			.unwrap_or(0.0);
 		passed / (self.tests.len() as f64)
 	}
 
