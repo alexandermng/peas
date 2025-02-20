@@ -1,8 +1,9 @@
 use std::fs;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use eyre::eyre;
 use peas::{
+	experiments::{speciation::SpeciationExperiment, Experiment},
 	genetic::{Configurable, GenAlg},
 	params::{GenAlgParams, SpeciesParams},
 	prelude::*,
@@ -19,6 +20,10 @@ use wasm_encoder::Instruction;
 /// Input command-line arguments
 #[derive(clap::Parser, Debug)]
 pub struct GenAlgParamsCLI {
+	/// Experiment
+	#[arg(short, long, value_enum)]
+	pub experiment: Option<AvailableExperiments>,
+
 	/// Config filename
 	#[arg(short = 'F', long = "config")]
 	pub config: Option<String>,
@@ -44,10 +49,40 @@ pub struct GenAlgParamsCLI {
 	pub num_generations: Option<usize>,
 }
 
+#[derive(ValueEnum, Clone, Debug)]
+pub enum AvailableExperiments {
+	Speciation,
+}
+
+type DynExperiment = dyn Experiment<
+	Genome = WasmGenome,
+	Ctx = Context,
+	ProblemSet = ProblemSet,
+	MutationSet = WasmMutationSet,
+	SelectorSet = TournamentSelection,
+	GA = WasmGenAlg<Sum3, WasmMutationSet, TournamentSelection>,
+>;
+impl AvailableExperiments {
+	pub fn get_experiment(&self) -> Box<DynExperiment> {
+		match self {
+			AvailableExperiments::Speciation => Box::new(SpeciationExperiment::default()),
+		}
+	}
+}
+
 fn main() -> eyre::Result<()> {
 	pretty_env_logger::init();
 
 	let args = GenAlgParamsCLI::parse();
+
+	// Pre-configured Experiments
+	if let Some(experiment) = args.experiment {
+		let mut exper = experiment.get_experiment();
+		exper.run();
+
+		return Ok(());
+	}
+
 	if let Some(filename) = args.config {
 		// replay a run
 		let contents = fs::read_to_string(filename)?;

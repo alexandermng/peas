@@ -8,6 +8,7 @@ use std::{
 		atomic::{AtomicU32, AtomicUsize, Ordering},
 		RwLock,
 	},
+	time::Instant,
 };
 
 use polars::prelude::*;
@@ -60,6 +61,9 @@ pub struct SpeciationTrialResults {
 	/// Unique ID of the trial
 	pub trial_id: usize,
 
+	/// Given threshold parameter for this trial
+	pub threshold: f64,
+
 	/// Number of generations at completion
 	pub num_generations: usize,
 
@@ -69,6 +73,9 @@ pub struct SpeciationTrialResults {
 	pub avg_fitnesses: Vec<f64>,
 	/// Max fitness, by generation
 	pub max_fitnesses: Vec<f64>,
+
+	/// Total time elapsed for the run, in seconds
+	pub time_taken: f64,
 
 	experiment_data: Arc<RwLock<SpeciationExperimentResults>>,
 }
@@ -102,7 +109,7 @@ impl Default for SpeciationExperiment {
 			fitness_sharing: true,
 		}];
 		let max_threshold = 5.0;
-		let num_spread = 100; // for linspace
+		let num_spread = 4; // for linspace
 		configurations.extend(
 			(0..num_spread)
 				.map(|i| max_threshold * (i as f64 / num_spread as f64)) // linspace
@@ -114,7 +121,7 @@ impl Default for SpeciationExperiment {
 		);
 		Self {
 			problem: ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2)),
-			num_runs_per: 100,
+			num_runs_per: 2,
 			configurations,
 			outdir,
 			data: None,
@@ -132,6 +139,15 @@ impl Experiment for SpeciationExperiment {
 	// TODO ^ fix this. rn hardcoded to sum3.
 
 	fn run(&mut self) {
+		fs::create_dir_all(&self.outdir).unwrap();
+		// TODO check empty
+		log::info!(
+			"Beginning Experiment with {} configs x {} runs each ({} total).",
+			self.configurations.len(),
+			self.num_runs_per,
+			self.configurations.len() * self.num_runs_per
+		);
+
 		let trial_count = AtomicUsize::new(0);
 		let results = Arc::new(RwLock::new(SpeciationExperimentResults::new()));
 		self.configurations
@@ -145,11 +161,22 @@ impl Experiment for SpeciationExperiment {
 				let mut params = self.base_params();
 				params.speciation = c.clone();
 				let id = trial_count.fetch_add(1, Ordering::Relaxed);
-				let results = SpeciationTrialResults::new(id, Arc::clone(&results));
+				let results = SpeciationTrialResults::new(
+					id,
+					params.speciation.threshold,
+					Arc::clone(&results),
+				);
 				let ga: Self::GA = WasmGenAlg::new(problem, params, results);
+				log::info!("Beginning trial {id}.");
 				ga
 			})
 			.for_each(|mut ga| ga.run()); // Run in parallel!
+
+		/*
+		TODO: do 1 run for each and then prune early (don't do extra trials if no fitness).
+		or better, to systematically search, arrange batches around successful thresholds or smthn.
+		need some way of intelligently finding.
+		 */
 		let trial_count = trial_count.load(Ordering::Relaxed);
 		log::info!("Completed {trial_count} trials.");
 		let results = Arc::try_unwrap(results)
@@ -181,7 +208,7 @@ impl Experiment for SpeciationExperiment {
 		GenAlgParams::builder()
 			.seed(0)
 			.pop_size(100)
-			.num_generations(100)
+			.num_generations(99)
 			.max_fitness(1.0)
 			.mutators(muts)
 			.mutation_rate(1.0)
@@ -204,7 +231,16 @@ impl Experiment for SpeciationExperiment {
 
 impl SpeciationExperimentResults {
 	pub fn new() -> Self {
-		todo!()
+		let data = df!(
+			"trial_id" => Vec::<u32>::new(),
+			"threshold" => Vec::<f64>::new(),
+			"generation" => Vec::<u32>::new(),
+			"num_species" => Vec::<u32>::new(),
+			"avg_fitness" => Vec::<f64>::new(),
+			"max_fitness" => Vec::<f64>::new(),
+		)
+		.unwrap();
+		Self { data }
 	}
 	pub fn report_trial(
 		&mut self,
@@ -216,29 +252,45 @@ impl SpeciationExperimentResults {
 		let ids = Series::new("trial_id".into(), vec![trial_id; trial_data.height()]);
 		let thresholds = Series::new("threshold".into(), vec![threshold; trial_data.height()]);
 		trial_data.insert_column(0, ids);
-		// trial_data.insert_column(1, threshold); // TODO figure out how to add. why cant f64?
+		trial_data.insert_column(1, thresholds);
 
 		self.data.vstack_mut_owned_unchecked(trial_data);
+		log::info!(
+			"Collected data from trial {trial_id} (threshold {threshold}, {} generations).",
+			results.num_generations
+		);
 	}
 }
 
 impl SpeciationTrialResults {
-	pub fn new(trial_id: usize, experiment_data: Arc<RwLock<SpeciationExperimentResults>>) -> Self {
+	pub fn new(
+		trial_id: usize,
+		threshold: f64,
+		experiment_data: Arc<RwLock<SpeciationExperimentResults>>,
+	) -> Self {
 		Self {
 			trial_id,
+			threshold,
 			num_generations: 0,
 			num_species: Vec::new(),
 			avg_fitnesses: Vec::new(),
 			max_fitnesses: Vec::new(),
 			experiment_data,
+			time_taken: 0.0,
 		}
 	}
 
 	pub fn to_data(&self) -> DataFrame {
 		let generations: Vec<u32> = (0..(self.num_generations as u32)).collect();
+		let num_species = if self.num_species.is_empty() {
+			// speciation is disabled, so set to all 0s
+			&vec![0; self.num_generations]
+		} else {
+			&self.num_species
+		};
 		DataFrame::new(vec![
 			Column::new("generation".into(), generations),
-			Column::new("num_species".into(), &self.num_species),
+			Column::new("num_species".into(), &num_species),
 			Column::new("avg_fitness".into(), &self.avg_fitnesses),
 			Column::new("max_fitness".into(), &self.max_fitnesses),
 		])
@@ -249,6 +301,10 @@ impl SpeciationTrialResults {
 impl Results for SpeciationTrialResults {
 	type Genome = WasmGenome;
 	type Ctx = Context;
+
+	fn initialize(&mut self, ctx: &mut Self::Ctx) {
+		ctx.start_time = Instant::now();
+	}
 
 	fn record_generation(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {
 		self.avg_fitnesses.push(ctx.avg_fitness);
@@ -265,6 +321,17 @@ impl Results for SpeciationTrialResults {
 		pop: &[Id<Self::Genome>],
 		outdir: &std::path::Path,
 	) {
+		self.time_taken = ctx.start_time.elapsed().as_secs_f64();
 		self.num_generations = ctx.generation + 1; // since 0-indexed
+		let mut exper = self.experiment_data.write().unwrap_or_else(|p| {
+			log::error!("Lock Poison error: {p}");
+			p.into_inner()
+		});
+		exper.report_trial(self.trial_id as u32, self.threshold, self);
+		log::info!(
+			"Completed trial {} ({:.3} secs).",
+			self.trial_id,
+			self.time_taken
+		);
 	}
 }
