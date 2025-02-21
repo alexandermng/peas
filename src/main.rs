@@ -15,7 +15,6 @@ use peas::{
 	},
 };
 use rand::Rng;
-use wasm_encoder::Instruction;
 
 /// Input command-line arguments
 #[derive(clap::Parser, Debug)]
@@ -51,7 +50,8 @@ pub struct GenAlgParamsCLI {
 
 #[derive(ValueEnum, Clone, Debug)]
 pub enum AvailableExperiments {
-	Speciation,
+	SpeciationControl,
+	SpeciationRange,
 }
 
 type DynExperiment = dyn Experiment<
@@ -65,7 +65,17 @@ type DynExperiment = dyn Experiment<
 impl AvailableExperiments {
 	pub fn get_experiment(&self) -> Box<DynExperiment> {
 		match self {
-			AvailableExperiments::Speciation => Box::new(SpeciationExperiment::default()),
+			AvailableExperiments::SpeciationControl => Box::new(SpeciationExperiment::gen_control(
+				"speciation_control",
+				2.0,
+				100,
+			)),
+			AvailableExperiments::SpeciationRange => Box::new(SpeciationExperiment::gen_linspace(
+				"speciation_range",
+				1.5..2.5,
+				10,
+				10,
+			)),
 		}
 	}
 }
@@ -92,38 +102,8 @@ fn main() -> eyre::Result<()> {
 			// mem::take?
 			config.output_dir = of;
 		}
-		// TODO pull in an init.wasm or smthn. this is jank and repeated
-		config.params.init_genome = match &config.problem {
-			ProblemSet::Sum3(_) => {
-				let params = &[StackValType::I32, StackValType::I32, StackValType::I32];
-				let result = &[StackValType::I32];
-				let mut wg = WasmGenome::new(0, params, result);
-				wg.genes
-					.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
-				wg
-			}
-			ProblemSet::Sum4(_) => {
-				let params = &[
-					StackValType::I32,
-					StackValType::I32,
-					StackValType::I32,
-					StackValType::I32,
-				];
-				let result = &[StackValType::I32];
-				let mut wg = WasmGenome::new(0, params, result);
-				wg.genes
-					.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
-				wg
-			}
-			ProblemSet::Polynom2(_) => {
-				let params = &[StackValType::I32, StackValType::I32];
-				let result = &[StackValType::I32];
-				let mut wg = WasmGenome::new(0, params, result);
-				wg.genes
-					.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
-				wg
-			}
-		};
+		// TODO be able to pull in an init.wasm or smthn.
+		config.params.init_genome = config.problem.init_genome();
 		let mut ga = WasmGenAlg::<Sum3>::from_config(config);
 		ga.run();
 		return Ok(());
@@ -131,38 +111,13 @@ fn main() -> eyre::Result<()> {
 
 	let problem = args.problem.unwrap_or_else(|| String::from("sum3"));
 	let num_tests = 100; // TODO put in args. or even better, put in ProblemParams
-	let (problem, init) = match &*problem {
-		"sum3" => (ProblemSet::Sum3(Sum3::new(num_tests, 0.1, 0.2)), {
-			let params = &[StackValType::I32, StackValType::I32, StackValType::I32];
-			let result = &[StackValType::I32];
-			let mut wg = WasmGenome::new(0, params, result);
-			wg.genes
-				.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
-			wg
-		}),
-		"sum4" => (ProblemSet::Sum4(Sum4::new(num_tests, 0.02, 0.04, 0.08)), {
-			let params = &[
-				StackValType::I32,
-				StackValType::I32,
-				StackValType::I32,
-				StackValType::I32,
-			];
-			let result = &[StackValType::I32];
-			let mut wg = WasmGenome::new(0, params, result);
-			wg.genes
-				.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
-			wg
-		}),
-		"polynom" => (ProblemSet::Polynom2(Polynom::new(num_tests, 0.3)), {
-			let params = &[StackValType::I32, StackValType::I32];
-			let result = &[StackValType::I32];
-			let mut wg = WasmGenome::new(0, params, result);
-			wg.genes
-				.push(WasmGene::new(Instruction::I32Const(0), InnovNum(0)));
-			wg
-		}),
+	let problem = match &*problem {
+		"sum3" => ProblemSet::Sum3(Sum3::new(num_tests, 0.1, 0.2)),
+		"sum4" => ProblemSet::Sum4(Sum4::new(num_tests, 0.02, 0.04, 0.08)),
+		"poly2" => ProblemSet::Polynom2(Polynom::new(num_tests, 0.3)),
 		_ => return Err(eyre!("Unknown problem")),
 	};
+	let init = problem.init_genome();
 	let muts: Vec<WasmMutationSet> = vec![
 		AddOperation::from_rate(0.1).into(), // local variable
 		ChangeRoot::from_rate(0.4).into(),   // consts, locals, push onto stack

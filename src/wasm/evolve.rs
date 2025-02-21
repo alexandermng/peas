@@ -330,9 +330,6 @@ impl Results for DefaultWasmGenAlgResults {
 		self.times.push(ctx.latest_time.elapsed().as_secs_f64());
 
 		// Update context stats
-		ctx.max_fitness = ctx[pop[0]].fitness;
-		ctx.avg_fitness =
-			ctx.iter_genomes(pop).map(WasmGenome::fitness).sum::<f64>() / (pop.len() as f64);
 		self.max_fitnesses.push(ctx.max_fitness);
 		self.avg_fitnesses.push(ctx.avg_fitness);
 
@@ -356,9 +353,6 @@ impl Results for DefaultWasmGenAlgResults {
 			);
 		}
 		self.hall_of_fame.push(pop[0]);
-
-		// Update Timing
-		ctx.latest_time = Instant::now();
 	}
 
 	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {
@@ -974,6 +968,13 @@ where
 			.sort_unstable_by(|a, b| f64::partial_cmp(&ctx[b].fitness, &ctx[a].fitness).unwrap());
 		let pop = &self.pop[..]; // read-only, guaranteed for hooks to be sorted by raw fitness
 
+		// Update stats for results recording
+		ctx.max_fitness = ctx[pop[0]].fitness;
+		ctx.avg_fitness =
+			ctx.iter_genomes(pop).map(WasmGenome::fitness).sum::<f64>() / (pop.len() as f64);
+		ctx.latest_time = Instant::now(); // TODO consider moving, get rid of timing inside ctx
+
+		// Run results recording
 		for r in &mut self.results {
 			r.record_generation(&mut ctx, pop);
 		}

@@ -3,6 +3,7 @@
 use std::{
 	fs::{self, File},
 	iter,
+	ops::Range,
 	path::PathBuf,
 	sync::{
 		atomic::{AtomicU32, AtomicUsize, Ordering},
@@ -12,6 +13,7 @@ use std::{
 };
 
 use polars::prelude::*;
+use rand::Rng;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::Serialize;
 
@@ -77,16 +79,22 @@ pub struct SpeciationTrialResults {
 	/// Total time elapsed for the run, in seconds
 	pub time_taken: f64,
 
+	/// Whether it succeeded or not
+	pub success: bool,
+
 	experiment_data: Arc<RwLock<SpeciationExperimentResults>>,
 }
 
 impl SpeciationExperiment {
 	pub fn new(
+		name: &str,
 		problem: ProblemSet,
 		num_runs_per: usize,
 		configurations: Vec<SpeciesParams>,
-		outdir: PathBuf,
 	) -> Self {
+		let mut outdir = PathBuf::new();
+		outdir.push("data");
+		outdir.push(name); // experiment name
 		Self {
 			problem,
 			num_runs_per,
@@ -96,36 +104,60 @@ impl SpeciationExperiment {
 			data: None,
 		}
 	}
+
+	/// Creates a speciation experiment from a linear space of the thresholds, as provided
+	/// by the range and number of configs to spread along it. Does not include a control.
+	pub fn gen_linspace(
+		name: &str,
+		range: Range<f64>,
+		num_configs: usize,
+		num_runs_per: usize,
+	) -> Self {
+		let linspace: Vec<_> = {
+			let step = (range.end - range.start) / (num_configs as f64);
+			let mut count = range.start - step;
+			iter::from_fn(move || {
+				count += step;
+				if range.contains(&count) {
+					Some(count)
+				} else {
+					None
+				}
+			})
+			.map(|threshold| SpeciesParams {
+				enabled: true,
+				threshold,
+				fitness_sharing: true,
+			})
+			.collect()
+		};
+		let problem = ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2));
+		Self::new(name, problem, num_runs_per, linspace)
+	}
+
+	/// Create an experiment with two configs, with speciation enabled and disabled. `onthreshold` is the threshold
+	/// to test when it's enabled.
+	pub fn gen_control(name: &str, onthreshold: f64, num_runs_per: usize) -> Self {
+		let problem = ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2));
+		let configs = vec![
+			SpeciesParams {
+				enabled: false,
+				threshold: 0.0,
+				fitness_sharing: false,
+			},
+			SpeciesParams {
+				enabled: true,
+				threshold: onthreshold,
+				fitness_sharing: true,
+			},
+		];
+		Self::new(name, problem, num_runs_per, configs)
+	}
 }
 
 impl Default for SpeciationExperiment {
 	fn default() -> Self {
-		let mut outdir = PathBuf::new();
-		outdir.push("data");
-		outdir.push("speciation"); // experiment name
-		let mut configurations = vec![SpeciesParams {
-			enabled: false,
-			threshold: 0.0,
-			fitness_sharing: true,
-		}];
-		let max_threshold = 5.0;
-		let num_spread = 4; // for linspace
-		configurations.extend(
-			(0..num_spread)
-				.map(|i| max_threshold * (i as f64 / num_spread as f64)) // linspace
-				.map(|threshold| SpeciesParams {
-					enabled: true,
-					threshold,
-					fitness_sharing: true,
-				}),
-		);
-		Self {
-			problem: ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2)),
-			num_runs_per: 2,
-			configurations,
-			outdir,
-			data: None,
-		}
+		Self::gen_linspace("speciation", 0.0..5.0, 10, 3)
 	}
 }
 
@@ -205,10 +237,11 @@ impl Experiment for SpeciationExperiment {
 			ChangeRoot::from_rate(0.4).into(),   // consts, locals, push onto stack
 		];
 		let init = self.problem.init_genome();
+		let seed: u64 = rand::rng().random();
 		GenAlgParams::builder()
-			.seed(0)
+			.seed(seed)
 			.pop_size(100)
-			.num_generations(99)
+			.num_generations(299)
 			.max_fitness(1.0)
 			.mutators(muts)
 			.mutation_rate(1.0)
@@ -256,7 +289,7 @@ impl SpeciationExperimentResults {
 
 		self.data.vstack_mut_owned_unchecked(trial_data);
 		log::info!(
-			"Collected data from trial {trial_id} (threshold {threshold}, {} generations).",
+			"Collected data from trial {trial_id} (threshold {threshold:.3}, {} generations).",
 			results.num_generations
 		);
 	}
@@ -277,6 +310,7 @@ impl SpeciationTrialResults {
 			max_fitnesses: Vec::new(),
 			experiment_data,
 			time_taken: 0.0,
+			success: false,
 		}
 	}
 
@@ -315,6 +349,10 @@ impl Results for SpeciationTrialResults {
 		self.num_species.push(species.len() as u32)
 	}
 
+	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {
+		self.success = true;
+	}
+
 	fn finalize(
 		&mut self,
 		ctx: &mut Self::Ctx,
@@ -329,8 +367,9 @@ impl Results for SpeciationTrialResults {
 		});
 		exper.report_trial(self.trial_id as u32, self.threshold, self);
 		log::info!(
-			"Completed trial {} ({:.3} secs).",
+			"Completed trial {} ({}, {:.3} secs).",
 			self.trial_id,
+			if self.success { "success" } else { "failure" },
 			self.time_taken
 		);
 	}
