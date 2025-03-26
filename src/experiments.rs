@@ -1,3 +1,4 @@
+pub mod partial_tests;
 pub mod speciation;
 
 use std::path::Path;

@@ -1,4 +1,4 @@
-//! Test the effect of speciation.
+//! Test the effect of degenerate/partial test cases used in the fitness function.
 
 use std::{
 	fs::{self, File},
@@ -32,17 +32,13 @@ use crate::{
 
 use super::Experiment;
 
-/// Tests performance based on the compatibility threshold in speciation. The control is with it disabled.
-/// Aggregates data about the number of species per generation
-pub struct SpeciationExperiment {
-	/// which problem to be acting on
-	pub problem: ProblemSet,
-
+/// Tests performance based on the proportion of partial test cases. The control is with it disabled.
+pub struct PartialTestsExperiment {
 	/// How many runs to run for each configuration
 	pub num_runs_per: usize,
 
-	/// Configurations of the intended parameter to vary, in this case the species paramaters (in particular, threshold).
-	pub configurations: Vec<SpeciesParams>,
+	/// Configurations of the intended parameter to vary, in this case the problem itself, with a partial test case proportion.
+	pub configurations: Vec<ProblemSet>,
 
 	// trials: Vec<<Self as Experiment>::GA>,
 	outdir: PathBuf,
@@ -53,18 +49,18 @@ pub struct SpeciationExperiment {
 
 /// Overall results for the entire experiment
 #[derive(Debug, Default, Clone)]
-pub struct SpeciationExperimentResults {
+pub struct PartialTestsExperimentResults {
 	pub data: DataFrame,
 }
 
 /// Results for a single trial/run
 #[derive(Clone)]
-pub struct SpeciationTrialResults {
+pub struct PartialTestsTrialResults {
 	/// Unique ID of the trial
 	pub trial_id: usize,
 
-	/// Given threshold parameter for this trial
-	pub threshold: f64,
+	/// Given proportion parameter for this trial
+	pub proportion: f64,
 
 	/// Number of generations at completion
 	pub num_generations: usize,
@@ -82,21 +78,15 @@ pub struct SpeciationTrialResults {
 	/// Whether it succeeded or not
 	pub success: bool,
 
-	experiment_data: Arc<RwLock<SpeciationExperimentResults>>,
+	experiment_data: Arc<RwLock<PartialTestsExperimentResults>>,
 }
 
-impl SpeciationExperiment {
-	pub fn new(
-		name: &str,
-		problem: ProblemSet,
-		num_runs_per: usize,
-		configurations: Vec<SpeciesParams>,
-	) -> Self {
+impl PartialTestsExperiment {
+	pub fn new(name: &str, num_runs_per: usize, configurations: Vec<ProblemSet>) -> Self {
 		let mut outdir = PathBuf::new();
 		outdir.push("data");
 		outdir.push(name); // experiment name
 		Self {
-			problem,
 			num_runs_per,
 			configurations,
 			// trials: Vec::new(),
@@ -105,63 +95,28 @@ impl SpeciationExperiment {
 		}
 	}
 
-	/// Creates a speciation experiment from a linear space of the thresholds, as provided
-	/// by the range and number of configs to spread along it. Does not include a control.
-	pub fn gen_linspace(
-		name: &str,
-		range: Range<f64>,
-		num_configs: usize,
-		num_runs_per: usize,
-	) -> Self {
-		let linspace: Vec<_> = {
-			let step = (range.end - range.start) / (num_configs as f64);
-			let mut count = range.start - step;
-			iter::from_fn(move || {
-				count += step;
-				if range.contains(&count) {
-					Some(count)
-				} else {
-					None
-				}
-			})
-			.map(|threshold| SpeciesParams {
-				enabled: true,
-				threshold,
-				fitness_sharing: true,
-			})
-			.collect()
-		};
-		let problem = ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2));
-		Self::new(name, problem, num_runs_per, linspace)
-	}
-
-	/// Create an experiment with two configs, with speciation enabled and disabled. `onthreshold` is the threshold
-	/// to test when it's enabled.
-	pub fn gen_control(name: &str, onthreshold: f64, num_runs_per: usize) -> Self {
-		let problem = ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2));
+	/// Create an experiment with two configs, with speciation enabled and disabled. `onproportion` is the total partial tests proportion
+	/// to test when it's enabled. A good value is `0.9`.
+	pub fn gen_control(name: &str, onproportion: f64, num_runs_per: usize) -> Self {
+		let one_proportion = onproportion * (0.3 / 0.9) / 3.0; // 3 partial tests of 1
+		let two_proportion = onproportion * (0.6 / 0.9) / 3.0; // 3 partial tests of 2, weighted double
 		let configs = vec![
-			SpeciesParams {
-				enabled: false,
-				threshold: 0.0,
-				fitness_sharing: false,
-			},
-			SpeciesParams {
-				enabled: true,
-				threshold: onthreshold,
-				fitness_sharing: true,
-			},
+			ProblemSet::Sum3(Sum3::new(100, 0.0, 0.0)),
+			ProblemSet::Sum3(Sum3::new(100, 0.0, two_proportion)),
+			ProblemSet::Sum3(Sum3::new(100, one_proportion, 0.0)),
+			ProblemSet::Sum3(Sum3::new(100, one_proportion, two_proportion)),
 		];
-		Self::new(name, problem, num_runs_per, configs)
+		Self::new(name, num_runs_per, configs)
 	}
 }
 
-impl Default for SpeciationExperiment {
+impl Default for PartialTestsExperiment {
 	fn default() -> Self {
-		Self::gen_linspace("speciation", 0.0..5.0, 10, 3)
+		Self::gen_control("partial_tests", 0.6, 10)
 	}
 }
 
-impl Experiment for SpeciationExperiment {
+impl Experiment for PartialTestsExperiment {
 	type Genome = WasmGenome;
 	type Ctx = Context;
 	type ProblemSet = ProblemSet;
@@ -181,23 +136,21 @@ impl Experiment for SpeciationExperiment {
 		);
 
 		let trial_count = AtomicUsize::new(0);
-		let results = Arc::new(RwLock::new(SpeciationExperimentResults::new()));
+		let results = Arc::new(RwLock::new(PartialTestsExperimentResults::new()));
 		self.configurations
 			.par_iter() // Lazy
 			.flat_map_iter(|c| iter::repeat_n(c, self.num_runs_per))
 			.map(|c| {
-				let problem = match &self.problem {
-					ProblemSet::Sum3(sum3) => sum3.clone(),
+				let (problem, proportion) = match &c {
+					ProblemSet::Sum3(sum3) => (
+						sum3.clone(),
+						sum3.partial1_tests_rate * 3.0 + sum3.partial2_tests_rate * 3.0,
+					),
 					_ => unimplemented!(),
 				};
-				let mut params = self.base_params();
-				params.speciation = c.clone();
+				let params = self.base_params();
 				let id = trial_count.fetch_add(1, Ordering::Relaxed);
-				let results = SpeciationTrialResults::new(
-					id,
-					params.speciation.threshold,
-					Arc::clone(&results),
-				);
+				let results = PartialTestsTrialResults::new(id, proportion, Arc::clone(&results));
 				let ga: Self::GA = WasmGenAlg::new(problem, params, results);
 				log::info!("Beginning trial {id}.");
 				ga
@@ -210,7 +163,7 @@ impl Experiment for SpeciationExperiment {
 			.expect("should only have one reference at this point")
 			.into_inner()
 			.unwrap();
-		let SpeciationExperimentResults { mut data } = results;
+		let PartialTestsExperimentResults { mut data } = results;
 		data.align_chunks_par(); // due to multiple vstacks
 
 		// TODO: configure output, generate graphs
@@ -231,7 +184,7 @@ impl Experiment for SpeciationExperiment {
 			AddOperation::from_rate(0.1).into(), // local variable
 			ChangeRoot::from_rate(0.4).into(),   // consts, locals, push onto stack
 		];
-		let init = self.problem.init_genome();
+		let init = self.configurations[0].init_genome();
 		let seed: u64 = rand::rng().random();
 		GenAlgParams::builder()
 			.seed(seed)
@@ -242,9 +195,9 @@ impl Experiment for SpeciationExperiment {
 			.mutation_rate(1.0)
 			.selector(TournamentSelection::new(0.6, 2, 0.9, true))
 			.speciation(SpeciesParams {
-				enabled: false,
-				threshold: 0.0,
-				fitness_sharing: false,
+				enabled: true,
+				threshold: 1.2,
+				fitness_sharing: true,
 			})
 			.init_genome(init)
 			.elitism_rate(0.05)
@@ -257,11 +210,11 @@ impl Experiment for SpeciationExperiment {
 	}
 }
 
-impl SpeciationExperimentResults {
+impl PartialTestsExperimentResults {
 	pub fn new() -> Self {
 		let data = df!(
 			"trial_id" => Vec::<u32>::new(),
-			"threshold" => Vec::<f64>::new(),
+			"proportion" => Vec::<f64>::new(),
 			"generation" => Vec::<u32>::new(),
 			"num_species" => Vec::<u32>::new(),
 			"avg_fitness" => Vec::<f64>::new(),
@@ -273,32 +226,32 @@ impl SpeciationExperimentResults {
 	pub fn report_trial(
 		&mut self,
 		trial_id: u32,
-		threshold: f64,
-		results: &SpeciationTrialResults,
+		proportion: f64,
+		results: &PartialTestsTrialResults,
 	) {
 		let mut trial_data = results.to_data();
 		let ids = Series::new("trial_id".into(), vec![trial_id; trial_data.height()]);
-		let thresholds = Series::new("threshold".into(), vec![threshold; trial_data.height()]);
+		let proportions = Series::new("proportion".into(), vec![proportion; trial_data.height()]);
 		trial_data.insert_column(0, ids);
-		trial_data.insert_column(1, thresholds);
+		trial_data.insert_column(1, proportions);
 
 		self.data.vstack_mut_owned_unchecked(trial_data);
 		log::info!(
-			"Collected data from trial {trial_id} (threshold {threshold:.3}, {} generations).",
+			"Collected data from trial {trial_id} (proportion {proportion:.3}, {} generations).",
 			results.num_generations
 		);
 	}
 }
 
-impl SpeciationTrialResults {
+impl PartialTestsTrialResults {
 	pub fn new(
 		trial_id: usize,
-		threshold: f64,
-		experiment_data: Arc<RwLock<SpeciationExperimentResults>>,
+		proportion: f64,
+		experiment_data: Arc<RwLock<PartialTestsExperimentResults>>,
 	) -> Self {
 		Self {
 			trial_id,
-			threshold,
+			proportion,
 			num_generations: 0,
 			num_species: Vec::new(),
 			avg_fitnesses: Vec::new(),
@@ -327,7 +280,7 @@ impl SpeciationTrialResults {
 	}
 }
 
-impl Results for SpeciationTrialResults {
+impl Results for PartialTestsTrialResults {
 	type Genome = WasmGenome;
 	type Ctx = Context;
 
@@ -360,7 +313,7 @@ impl Results for SpeciationTrialResults {
 			log::error!("Lock Poison error: {p}");
 			p.into_inner()
 		});
-		exper.report_trial(self.trial_id as u32, self.threshold, self);
+		exper.report_trial(self.trial_id as u32, self.proportion, self);
 		log::info!(
 			"Completed trial {} ({}, {:.3} secs).",
 			self.trial_id,

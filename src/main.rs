@@ -3,7 +3,9 @@ use std::fs;
 use clap::{Parser, ValueEnum};
 use eyre::eyre;
 use peas::{
-	experiments::{speciation::SpeciationExperiment, Experiment},
+	experiments::{
+		partial_tests::PartialTestsExperiment, speciation::SpeciationExperiment, Experiment,
+	},
 	genetic::{Configurable, GenAlg},
 	params::{GenAlgParams, SpeciesParams},
 	prelude::*,
@@ -52,6 +54,7 @@ pub struct GenAlgParamsCLI {
 pub enum AvailableExperiments {
 	SpeciationControl,
 	SpeciationRange,
+	PartialTests,
 }
 
 type DynExperiment = dyn Experiment<
@@ -74,6 +77,11 @@ impl AvailableExperiments {
 				"speciation_range",
 				1.5..2.5,
 				10,
+				10,
+			)),
+			AvailableExperiments::PartialTests => Box::new(PartialTestsExperiment::gen_control(
+				"partial_tests",
+				0.9,
 				10,
 			)),
 		}
