@@ -82,7 +82,7 @@ impl AvailableExperiments {
 			AvailableExperiments::PartialTests => Box::new(PartialTestsExperiment::gen_control(
 				"partial_tests",
 				0.9,
-				10,
+				10, // TODO make this a CLI parameter
 			)),
 		}
 	}

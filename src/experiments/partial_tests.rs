@@ -102,8 +102,8 @@ impl PartialTestsExperiment {
 		let two_proportion = onproportion * (0.6 / 0.9) / 3.0; // 3 partial tests of 2, weighted double
 		let configs = vec![
 			ProblemSet::Sum3(Sum3::new(100, 0.0, 0.0)),
-			ProblemSet::Sum3(Sum3::new(100, 0.0, two_proportion)),
 			ProblemSet::Sum3(Sum3::new(100, one_proportion, 0.0)),
+			ProblemSet::Sum3(Sum3::new(100, 0.0, two_proportion)),
 			ProblemSet::Sum3(Sum3::new(100, one_proportion, two_proportion)),
 		];
 		Self::new(name, num_runs_per, configs)
@@ -173,6 +173,35 @@ impl Experiment for PartialTestsExperiment {
 			.include_header(true)
 			.finish(&mut data)
 			.unwrap();
+
+		let mut gens_per_trial = data
+			.clone()
+			.lazy()
+			.group_by([col("trial_id")])
+			.agg([
+				col("proportion").first(),
+				col("generation").len().alias("num_generations"),
+			]) // number of generations per trial
+			.collect()
+			.unwrap();
+		let mut gens_file = self.outdir.join("generations.csv");
+		CsvWriter::new(&mut file)
+			.include_header(true)
+			.finish(&mut gens_per_trial)
+			.unwrap();
+		let gens = gens_per_trial
+			.lazy()
+			.group_by([col("proportion").sort(Default::default())])
+			.agg([
+				col("num_generations").mean().alias("avg_gens"),
+				col("num_generations").std(0).alias("stddev_gens"),
+				col("num_generations").min().alias("min_gens"),
+				col("num_generations").max().alias("max_gens"),
+				// TODO: success proportion (count where less than max / total count)
+			]) // final generation stats
+			.collect()
+			.unwrap();
+		log::info!("Generations:\n{gens}");
 
 		self.data = Some(data);
 	}

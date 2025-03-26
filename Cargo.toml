@@ -11,7 +11,7 @@ csv = "1.3.1"
 derive_more = { version = "2.0.1", features = ["display", "from", "into"] }
 eyre = "0.6.12"
 log = "0.4.25"
-polars = { version = "0.46.0", features = ["csv"] }
+polars = { version = "0.46.0", features = ["csv", "lazy"] }
 pretty_env_logger = "0.5.0"
 rand = "0.9.0"
 rand_pcg = "0.9.0"
