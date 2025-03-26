@@ -174,6 +174,7 @@ impl Experiment for PartialTestsExperiment {
 			.finish(&mut data)
 			.unwrap();
 
+		let fail_gens = self.base_params().num_generations as f64;
 		let mut gens_per_trial = data
 			.clone()
 			.lazy()
@@ -181,11 +182,12 @@ impl Experiment for PartialTestsExperiment {
 			.agg([
 				col("proportion").first(),
 				col("generation").len().alias("num_generations"),
+				col("max_fitness").last().eq(lit(1.0)).alias("success"),
 			]) // number of generations per trial
 			.collect()
 			.unwrap();
-		let mut gens_file = self.outdir.join("generations.csv");
-		CsvWriter::new(&mut file)
+		let mut gens_file = File::create(self.outdir.join("generations.csv")).unwrap();
+		CsvWriter::new(&mut gens_file)
 			.include_header(true)
 			.finish(&mut gens_per_trial)
 			.unwrap();
@@ -197,7 +199,7 @@ impl Experiment for PartialTestsExperiment {
 				col("num_generations").std(0).alias("stddev_gens"),
 				col("num_generations").min().alias("min_gens"),
 				col("num_generations").max().alias("max_gens"),
-				// TODO: success proportion (count where less than max / total count)
+				col("success").mean().alias("success_rate"),
 			]) // final generation stats
 			.collect()
 			.unwrap();
