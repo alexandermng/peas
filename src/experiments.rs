@@ -1,3 +1,4 @@
+pub mod ablation;
 pub mod partial_tests;
 pub mod speciation;
 
