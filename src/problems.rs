@@ -51,7 +51,7 @@ where
 	}
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "name")]
 pub enum ProblemSet {
 	Sum3(Sum3),

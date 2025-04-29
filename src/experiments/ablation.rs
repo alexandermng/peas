@@ -21,7 +21,7 @@ use serde::Serialize;
 
 use crate::{
 	genetic::{GenAlg, Results},
-	params::{GenAlgParams, SpeciesParams},
+	params::{GenAlgParams, GenAlgParamsBuilder, SpeciesParams},
 	prelude::Problem,
 	problems::{ProblemSet, Sum3},
 	selection::TournamentSelection,
@@ -35,14 +35,23 @@ use crate::{
 
 use super::Experiment;
 
-type ExperimentConfig = GenAlgParams<WasmGenome, Context, WasmMutationSet, TournamentSelection>;
+#[derive(Debug, Clone)]
+pub struct ExperimentConfig {
+	/// Name representing the configuration parameters. Not unique across multiple trials.
+	pub label: String,
 
-/// Tests performance based on the proportion of partial test cases. The control is with it disabled.
+	/// Problem to solve
+	pub problem: ProblemSet,
+
+	/// Input Parameters for Genetic Algorithm
+	pub params: GenAlgParams<WasmGenome, Context, WasmMutationSet, TournamentSelection>,
+}
+
 pub struct AblationExperiment {
 	/// How many runs to run for each configuration
 	pub num_runs_per: usize,
 
-	/// Configurations of the intended parameter to vary, in this case the problem itself, with a partial test case proportion.
+	/// Configurations with different parameters to test
 	pub configurations: Vec<ExperimentConfig>,
 
 	// trials: Vec<<Self as Experiment>::GA>,
@@ -101,26 +110,66 @@ impl AblationExperiment {
 		}
 	}
 
-	// /// Create an experiment with two configs, with speciation enabled and disabled. `onproportion` is the total partial tests proportion
-	// /// to test when it's enabled. A good value is `0.9`.
-	// pub fn gen_control(name: &str, onproportion: f64, num_runs_per: usize) -> Self {
-	// 	let one_proportion = onproportion * (0.3 / 0.9) / 3.0; // 3 partial tests of 1
-	// 	let two_proportion = onproportion * (0.6 / 0.9) / 3.0; // 3 partial tests of 2, weighted double
-	// 	let configs = vec![
-	// 		ProblemSet::Sum3(Sum3::new(100, 0.0, 0.0)),
-	// 		ProblemSet::Sum3(Sum3::new(100, one_proportion, 0.0)),
-	// 		ProblemSet::Sum3(Sum3::new(100, 0.0, two_proportion)),
-	// 		ProblemSet::Sum3(Sum3::new(100, one_proportion, two_proportion)),
-	// 	];
-
-	// 	Self::new(name, num_runs_per, configs)
-	// }
+	pub fn gen_control(name: &str, num_runs_per: usize) -> Self {
+		let base_problem = ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2));
+		let nopartial_problem = ProblemSet::Sum3(Sum3::new(100, 0.0, 0.0));
+		let base_params = AblationExperiment::new("empty", 0, vec![]).base_params();
+		let configs = vec![
+			ExperimentConfig {
+				label: "control".to_owned(),
+				problem: base_problem.clone(),
+				params: base_params.clone(),
+			},
+			ExperimentConfig {
+				label: "no_speciation".to_owned(),
+				problem: base_problem.clone(),
+				params: {
+					let mut params = base_params.clone();
+					params.speciation.enabled = false;
+					params
+				},
+			},
+			ExperimentConfig {
+				label: "no_crossover".to_owned(),
+				problem: base_problem.clone(),
+				params: {
+					let mut params = base_params.clone();
+					params.crossover_rate = 0.0;
+					params.speciation.enabled = false;
+					params
+				},
+			},
+			ExperimentConfig {
+				label: "no_elitism".to_owned(),
+				problem: base_problem.clone(),
+				params: {
+					let mut params = base_params.clone();
+					params.elitism_rate = 0.0;
+					params
+				},
+			},
+			ExperimentConfig {
+				label: "no_partials".to_owned(),
+				problem: nopartial_problem.clone(),
+				params: base_params.clone(),
+			},
+			ExperimentConfig {
+				label: "no_partials_no_speciation".to_owned(),
+				problem: nopartial_problem.clone(),
+				params: {
+					let mut params = base_params.clone();
+					params.speciation.enabled = false;
+					params
+				},
+			},
+		];
+		Self::new(name, num_runs_per, configs)
+	}
 }
 
 impl Default for AblationExperiment {
 	fn default() -> Self {
-		// Self::gen_control("partial_tests", 0.6, 10)
-		todo!()
+		Self::gen_control("ablation", 10)
 	}
 }
 
@@ -148,11 +197,14 @@ impl Experiment for AblationExperiment {
 		self.configurations
 			.par_iter() // Lazy
 			.flat_map_iter(|c| iter::repeat_n(c, self.num_runs_per))
-			.map(|params| {
-				let params = params.clone();
-				// TODO: fix
-				let problem = Sum3::new(100, 0.0, 0.0);
+			.map(|cfg| {
 				let id = trial_count.fetch_add(1, Ordering::Relaxed);
+				results.write().unwrap().params.insert(id, cfg.clone());
+				let problem = match &cfg.problem {
+					ProblemSet::Sum3(p) => p.clone(),
+					_ => panic!("Unsupported problem type"),
+				};
+				let params = cfg.params.clone();
 				let results = AblationTrialResults::new(id, Arc::clone(&results));
 				let ga: Self::GA = WasmGenAlg::new(problem, params, results);
 				log::info!("Beginning trial {id}.");
@@ -186,7 +238,7 @@ impl Experiment for AblationExperiment {
 			.lazy()
 			.group_by([col("trial_id")])
 			.agg([
-				col("proportion").first(),
+				col("label").first(),
 				col("generation").len().alias("num_generations"),
 				col("max_fitness").last().eq(lit(1.0)).alias("success"),
 			]) // number of generations per trial
@@ -199,7 +251,7 @@ impl Experiment for AblationExperiment {
 			.unwrap();
 		let gens = gens_per_trial
 			.lazy()
-			.group_by([col("proportion").sort(Default::default())])
+			.group_by([col("label").sort(Default::default())])
 			.agg([
 				col("num_generations").mean().alias("avg_gens"),
 				col("num_generations").std(0).alias("stddev_gens"),
@@ -252,7 +304,7 @@ impl AblationExperimentResults {
 	pub fn new() -> Self {
 		let data = df!(
 			"trial_id" => Vec::<u32>::new(),
-			"proportion" => Vec::<f64>::new(),
+			"label" => Vec::<String>::new(),
 			"generation" => Vec::<u32>::new(),
 			"num_species" => Vec::<u32>::new(),
 			"avg_fitness" => Vec::<f64>::new(),
@@ -267,14 +319,14 @@ impl AblationExperimentResults {
 	pub fn report_trial(&mut self, trial_id: u32, results: &AblationTrialResults) {
 		let mut trial_data = results.to_data();
 		let ids = Series::new("trial_id".into(), vec![trial_id; trial_data.height()]);
-		todo!(); // TODO instead of proportions, get trial params from self
-		   // let proportions = Series::new("proportion".into(), vec![proportion; trial_data.height()]);
+		let label = self.params[&(trial_id as usize)].label.clone();
+		let labels = Series::new("label".into(), vec![label.clone(); trial_data.height()]);
 		trial_data.insert_column(0, ids);
-		// trial_data.insert_column(1, proportions);
+		trial_data.insert_column(1, labels);
 
 		self.data.vstack_mut_owned_unchecked(trial_data);
 		log::info!(
-			"Collected data from trial {trial_id} (..., {} generations).",
+			"Collected data from trial {trial_id} :: {label} ({} generations).",
 			results.num_generations
 		);
 	}

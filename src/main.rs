@@ -4,7 +4,8 @@ use clap::{Parser, ValueEnum};
 use eyre::eyre;
 use peas::{
 	experiments::{
-		partial_tests::PartialTestsExperiment, speciation::SpeciationExperiment, Experiment,
+		ablation::AblationExperiment, partial_tests::PartialTestsExperiment,
+		speciation::SpeciationExperiment, Experiment,
 	},
 	genetic::{Configurable, GenAlg},
 	params::{GenAlgParams, SpeciesParams},
@@ -55,6 +56,7 @@ pub enum AvailableExperiments {
 	SpeciationControl,
 	SpeciationRange,
 	PartialTests,
+	Ablation,
 }
 
 type DynExperiment = dyn Experiment<
@@ -77,13 +79,16 @@ impl AvailableExperiments {
 				"speciation_range",
 				1.5..2.5,
 				10,
-				10,
+				24,
 			)),
 			AvailableExperiments::PartialTests => Box::new(PartialTestsExperiment::gen_control(
 				"partial_tests",
 				0.9,
-				10, // TODO make this a CLI parameter
+				100, // TODO make this a CLI parameter
 			)),
+			AvailableExperiments::Ablation => {
+				Box::new(AblationExperiment::gen_control("ablation", 10))
+			}
 		}
 	}
 }
