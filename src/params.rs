@@ -2,12 +2,13 @@ use bon::{builder, Builder};
 use derive_more::derive::{From, Into};
 use rand::Rng;
 use serde::{Deserialize, Serialize, Serializer};
+use std::fmt::Debug;
 use std::path::Path;
 use std::str::FromStr;
 use std::{fs, marker::PhantomData};
 use toml;
 
-use crate::genetic::Results;
+use crate::genetic::{GenAlg, Results};
 use crate::problems::{Problem, ProblemSet};
 use crate::{
 	genetic::{AsContext, Genome, Mutator, OnceMutator, Predicate, Selector},
@@ -19,26 +20,23 @@ use crate::{
 #[derive(Serialize, Deserialize, Builder, Debug, Clone)]
 #[serde(bound = "
 	G: Default,
-	P: Serialize + for<'p> Deserialize<'p>,
 	M: Serialize + for<'m> Deserialize<'m>,
 	S: Serialize + for<'s> Deserialize<'s>,
 ")]
 #[rustfmt::skip]
-pub struct GenAlgConfig<G, C, P, M, S>
+pub struct GenAlgConfig<G, C, M, S>
 where
 	G: Genome<C>,
 	C: AsContext,
 	M: Mutator<G, C>,
 	S: Selector<G, C>,
 {
-	pub problem: P,
+	pub problem: ProblemSet, // TODO: Fix
 	pub params: GenAlgParams<G, C, M, S>,
 
-	// /// Skipped when serializing, so you must build yourself
-	// #[serde(skip)]
-	// pub results: R,
-	// ^ unused rn, so leave out for simplicity.
-	// TODO add ResultsParams
+	/// Results to be output.
+	#[serde(skip)]
+	pub results: ResultsParams,
 
 	/// Enclosing output directory, containing this config (serialized as `config.toml`) and
 	/// other logs.
@@ -68,6 +66,24 @@ pub(crate) fn default_resultsfile() -> String {
 	"results.json".into()
 }
 
+pub trait Configurator: Serialize + for<'c> Deserialize<'c> {
+	type Genome: Genome<Self::Ctx> + Default;
+	type Ctx: AsContext;
+	type ProblemSet: Serialize + for<'p> Deserialize<'p>; // Problem Set
+	type MutationSet: Mutator<Self::Genome, Self::Ctx> + Serialize + for<'m> Deserialize<'m>;
+	type SelectorSet: Selector<Self::Genome, Self::Ctx> + Serialize + for<'s> Deserialize<'s>;
+	type Results: Results + Serialize;
+	type Output: GenAlg<G = Self::Genome, C = Self::Ctx>;
+
+	fn gen_params(
+		&self,
+	) -> GenAlgParams<Self::Genome, Self::Ctx, Self::MutationSet, Self::SelectorSet>;
+	fn gen_results(&self) -> Self::Results;
+	fn build() -> Self::Output;
+
+	// TODO: ... merge? idk
+}
+
 /// Actual parameters for the genetic algorithm. Can be saved as an output to a file and subsequently loaded in to replicate runs.
 #[derive(Serialize, Deserialize, Builder, Debug)]
 #[serde(bound = "
@@ -85,7 +101,6 @@ where
 	#[builder(default, into)]
 	#[serde(default)]
 	pub seed: SeedString, // set seed for the run, can convert into u64
-
 	pub pop_size: usize,
 	pub num_generations: usize,
 	pub max_fitness: Option<f64>,
@@ -120,18 +135,71 @@ where
 {
 	fn clone(&self) -> Self {
 		Self {
-			seed: self.seed.clone(),
-			pop_size: self.pop_size.clone(),
-			num_generations: self.num_generations.clone(),
-			max_fitness: self.max_fitness.clone(),
+			seed: self.seed,
+			pop_size: self.pop_size,
+			num_generations: self.num_generations,
+			max_fitness: self.max_fitness,
 			mutators: self.mutators.clone(),
-			mutation_rate: self.mutation_rate.clone(),
+			mutation_rate: self.mutation_rate,
 			selector: self.selector.clone(),
 			speciation: self.speciation.clone(),
 			init_genome: self.init_genome.clone(),
-			elitism_rate: self.elitism_rate.clone(),
-			crossover_rate: self.crossover_rate.clone(),
-			_ctx: self._ctx.clone(),
+			elitism_rate: self.elitism_rate,
+			crossover_rate: self.crossover_rate,
+			_ctx: self._ctx,
+		}
+	}
+}
+
+/// Parameters for results output.
+#[derive(Serialize, Deserialize)]
+pub struct ResultsParams {
+	pub use_default: bool,
+
+	#[serde(skip)]
+	pub custom_results: Vec<crate::wasm::WasmGenAlgResults>,
+	// TODO: fix this shit. below, too.
+}
+
+impl ResultsParams {
+	pub fn from_single(
+		custom: impl Results<Genome = WasmGenome, Ctx = Context> + Send + Sync + 'static,
+	) -> Self {
+		let c: Vec<crate::wasm::WasmGenAlgResults> = vec![Box::new(custom)];
+		Self::from_custom(c)
+	}
+
+	pub fn from_custom(custom_results: Vec<crate::wasm::WasmGenAlgResults>) -> Self {
+		Self {
+			use_default: false,
+			custom_results,
+		}
+	}
+}
+
+impl Default for ResultsParams {
+	fn default() -> Self {
+		Self {
+			use_default: true,
+			custom_results: vec![],
+		}
+	}
+}
+
+impl Debug for ResultsParams {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("ResultsParams")
+			.field("use_default", &self.use_default)
+			.field("custom_results", &self.custom_results.len())
+			.finish()
+	}
+}
+
+impl Clone for ResultsParams {
+	fn clone(&self) -> Self {
+		Self {
+			use_default: self.use_default.clone(),
+			custom_results: vec![],
 		}
 	}
 }

@@ -20,15 +20,15 @@ use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterato
 use serde::Serialize;
 
 use crate::{
-	genetic::{GenAlg, Results},
-	params::{GenAlgParams, GenAlgParamsBuilder, SpeciesParams},
+	genetic::{Configurable, GenAlg, Genome, Results},
+	params::{GenAlgParams, GenAlgParamsBuilder, ResultsParams, SpeciesParams},
 	prelude::Problem,
-	problems::{ProblemSet, Sum3},
+	problems::{Polynom, ProblemSet, Sum3, Sum4},
 	selection::TournamentSelection,
 	wasm::{
 		mutations::{AddOperation, ChangeRoot, WasmMutationSet},
 		species::WasmSpecies,
-		Context, WasmGenAlg, WasmGenome,
+		Context, WasmGenAlg, WasmGenAlgConfig, WasmGenome,
 	},
 	Id,
 };
@@ -110,10 +110,26 @@ impl AblationExperiment {
 		}
 	}
 
-	pub fn gen_control(name: &str, num_runs_per: usize) -> Self {
-		let base_problem = ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2));
-		let nopartial_problem = ProblemSet::Sum3(Sum3::new(100, 0.0, 0.0));
-		let base_params = AblationExperiment::new("empty", 0, vec![]).base_params();
+	/// Basic experiment suite for a given problem.
+	pub fn gen_basic(name: &str, problem: ProblemSet, num_runs_per: usize) -> Self {
+		// let base_problem = ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2));
+		let nopartial_problem = match &problem {
+			ProblemSet::Sum3(Sum3 { ref num_tests, .. }) => {
+				ProblemSet::Sum3(Sum3::new(*num_tests, 0.0, 0.0))
+			}
+			ProblemSet::Sum4(Sum4 { num_tests, .. }) => {
+				ProblemSet::Sum4(Sum4::new(*num_tests, 0.0, 0.0, 0.0))
+			}
+			ProblemSet::Polynom2(Polynom::<2> { num_tests, .. }) => {
+				ProblemSet::Polynom2(Polynom::<2>::new(*num_tests, 0.0))
+			}
+		};
+		let base_problem = problem;
+		let base_params = {
+			let mut p = AblationExperiment::new("empty", 0, vec![]).base_params(); // ugly circular, but works. will get warning, but this fixes
+			p.init_genome = base_problem.init_genome();
+			p
+		};
 		let configs = vec![
 			ExperimentConfig {
 				label: "control".to_owned(),
@@ -169,7 +185,7 @@ impl AblationExperiment {
 
 impl Default for AblationExperiment {
 	fn default() -> Self {
-		Self::gen_control("ablation", 10)
+		Self::gen_basic("ablation", ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2)), 10)
 	}
 }
 
@@ -180,13 +196,14 @@ impl Experiment for AblationExperiment {
 	type MutationSet = WasmMutationSet;
 	type SelectorSet = TournamentSelection;
 	type GA = WasmGenAlg<Sum3, Self::MutationSet, Self::SelectorSet>;
-	// TODO ^ fix this. rn hardcoded to sum3.
+	// TODO ^ fix this. rn hardcoded to sum3, but also not rly used rn.
 
 	fn run(&mut self) {
 		fs::create_dir_all(&self.outdir).unwrap();
 		// TODO check empty
 		log::info!(
-			"Beginning Experiment with {} configs x {} runs each ({} total).",
+			"Beginning ablation experiment on problem {} :: {} configs x {} runs each ({} total).",
+			self.configurations[0].problem, // since all configs have same problem (for now)
 			self.configurations.len(),
 			self.num_runs_per,
 			self.configurations.len() * self.num_runs_per
@@ -200,14 +217,18 @@ impl Experiment for AblationExperiment {
 			.map(|cfg| {
 				let id = trial_count.fetch_add(1, Ordering::Relaxed);
 				results.write().unwrap().params.insert(id, cfg.clone());
-				let problem = match &cfg.problem {
-					ProblemSet::Sum3(p) => p.clone(),
-					_ => panic!("Unsupported problem type"),
-				};
 				let params = cfg.params.clone();
-				let results = AblationTrialResults::new(id, Arc::clone(&results));
-				let ga: Self::GA = WasmGenAlg::new(problem, params, results);
-				log::info!("Beginning trial {id}.");
+				let results =
+					ResultsParams::from_single(AblationTrialResults::new(id, Arc::clone(&results)));
+				let ga = WasmGenAlg::<Sum3>::from_config(
+					WasmGenAlgConfig::builder()
+						.problem(cfg.problem.clone())
+						.params(params)
+						.results(results)
+						.output_dir(self.outdir.to_str().unwrap().to_owned())
+						.build(),
+				);
+				log::info!("Beginning trial {id} :: {}, {}", cfg.problem, cfg.label);
 				ga
 			})
 			.for_each(|mut ga| ga.run()); // Run in parallel!
@@ -273,8 +294,13 @@ impl Experiment for AblationExperiment {
 			AddOperation::from_rate(0.1).into(), // local variable
 			ChangeRoot::from_rate(0.4).into(),   // consts, locals, push onto stack
 		];
-		// TODO: fix
-		let init = ProblemSet::Sum3(Sum3::new(100, 0.0, 0.0)).init_genome();
+		let init = if !self.configurations.is_empty() {
+			self.configurations[0].problem.clone()
+		} else {
+			log::warn!("Problem not found for init genome, defaulting to Sum3.");
+			ProblemSet::Sum3(Sum3::new(100, 0.0, 0.0))
+		}
+		.init_genome();
 		let seed: u64 = rand::rng().random();
 		GenAlgParams::builder()
 			.seed(seed)

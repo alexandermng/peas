@@ -7,7 +7,7 @@ export RUST_LOG=info
 for i in $(seq 1 $N); do
 	echo '--------------------------------'
 	echo Beginning Run $i.
-	cargo run -- --problem $PROBLEM --numgens 300
+	cargo run -- --problem $PROBLEM --gens 300
 	echo Completed Run $i.
 	echo '--------------------------------'
 done

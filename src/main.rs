@@ -38,6 +38,10 @@ pub struct GenAlgParamsCLI {
 	#[arg(short = 'p', long = "problem")]
 	pub problem: Option<String>,
 
+	/// Number of trial runs per configuration. Only available when `--experiment` is set.
+	#[arg(short = 'n', long = "nruns")]
+	pub num_runs: Option<usize>,
+
 	/// Seed for algorithm run
 	#[arg(short = 's', long = "seed")]
 	pub seed: Option<u64>,
@@ -47,7 +51,7 @@ pub struct GenAlgParamsCLI {
 	pub pop_size: Option<usize>,
 
 	/// Number of Generations
-	#[arg(short = 'n', long = "numgens")]
+	#[arg(short = 'g', long = "gens")]
 	pub num_generations: Option<usize>,
 }
 
@@ -68,26 +72,33 @@ type DynExperiment = dyn Experiment<
 	GA = WasmGenAlg<Sum3, WasmMutationSet, TournamentSelection>,
 >;
 impl AvailableExperiments {
-	pub fn get_experiment(&self) -> Box<DynExperiment> {
+	pub fn create_experiment(&self, problem: String, num_runs_per: usize) -> Box<DynExperiment> {
 		match self {
 			AvailableExperiments::SpeciationControl => Box::new(SpeciationExperiment::gen_control(
 				"speciation_control",
 				2.0,
-				100,
+				num_runs_per,
 			)),
 			AvailableExperiments::SpeciationRange => Box::new(SpeciationExperiment::gen_linspace(
 				"speciation_range",
 				1.5..2.5,
 				10,
-				24,
+				num_runs_per,
 			)),
 			AvailableExperiments::PartialTests => Box::new(PartialTestsExperiment::gen_control(
 				"partial_tests",
 				0.9,
-				100, // TODO make this a CLI parameter
+				num_runs_per,
 			)),
 			AvailableExperiments::Ablation => {
-				Box::new(AblationExperiment::gen_control("ablation", 10))
+				let name = format!("ablation_{problem}");
+				let problem = match problem.as_str() {
+					"sum3" => ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2)),
+					"sum4" => ProblemSet::Sum4(Sum4::new(100, 0.02, 0.04, 0.08)),
+					"poly2" => ProblemSet::Polynom2(Polynom::new(100, 0.3)),
+					_ => panic!("Unknown problem"),
+				};
+				Box::new(AblationExperiment::gen_basic(&name, problem, num_runs_per))
 			}
 		}
 	}
@@ -100,7 +111,10 @@ fn main() -> eyre::Result<()> {
 
 	// Pre-configured Experiments
 	if let Some(experiment) = args.experiment {
-		let mut exper = experiment.get_experiment();
+		let problem = args.problem.unwrap_or_else(|| String::from("sum3"));
+		let num_runs = args.num_runs.unwrap_or(10);
+
+		let mut exper = experiment.create_experiment(problem, num_runs);
 		exper.run();
 
 		return Ok(());
@@ -153,21 +167,18 @@ fn main() -> eyre::Result<()> {
 		.elitism_rate(0.05)
 		.crossover_rate(0.8)
 		.build();
-	let mut results = DefaultWasmGenAlgResults::default();
-	results.resultsfile = Some("results.json".into());
-	results.datafile = Some("data.csv".into()); // TODO deduplicate much of this by just loading a default config and merging in passed args
 	match problem {
 		//.... hey. it works.
 		ProblemSet::Sum3(p) => {
-			let mut ga = WasmGenAlg::new(p, params, results);
+			let mut ga = WasmGenAlg::new(p, params);
 			ga.run();
 		}
 		ProblemSet::Sum4(p) => {
-			let mut ga = WasmGenAlg::new(p, params, results);
+			let mut ga = WasmGenAlg::new(p, params);
 			ga.run();
 		}
 		ProblemSet::Polynom2(p) => {
-			let mut ga = WasmGenAlg::new(p, params, results);
+			let mut ga = WasmGenAlg::new(p, params);
 			ga.run();
 		}
 	}

@@ -32,7 +32,7 @@ use crate::{
 		self, Configurable, ConfiguredGenAlg, GenAlg, Genome, Mutator, OnceMutator, Predicate,
 		Selector, Species,
 	},
-	params,
+	params::{self, ResultsParams},
 	problems::{Problem, ProblemSet, Solution, Sum3},
 	wasm::GeneDiff,
 	Id,
@@ -388,9 +388,9 @@ impl Results for DefaultWasmGenAlgResults {
 	}
 }
 
-pub type WasmGenAlgConfig<M, S> = GenAlgConfig<WasmGenome, Context, ProblemSet, M, S>;
+pub type WasmGenAlgConfig<M, S> = GenAlgConfig<WasmGenome, Context, M, S>;
 pub type WasmGenAlgParams<M, S> = GenAlgParams<WasmGenome, Context, M, S>;
-pub type WasmGenAlgResults = Box<dyn Results<Genome = WasmGenome, Ctx = Context> + Send>;
+pub type WasmGenAlgResults = Box<dyn Results<Genome = WasmGenome, Ctx = Context> + Send + Sync>;
 
 /// A genetic algorithm for synthesizing WebAssembly modules to solve a problem. The problem must specify
 /// a fitness function. Parametrized across the problem, the mutation type, and the selection type.
@@ -423,38 +423,47 @@ where
 // TODO refactor this mess entirely. it's horrendous.
 impl<P, M, S> Configurable<WasmGenAlgConfig<M, S>> for WasmGenAlg<P, M, S>
 where
-	P: Problem + Sync + Clone,
-	ProblemSet: From<P>,
-	M: Mutator<WasmGenome, Context> + Clone + for<'m> Deserialize<'m> + Serialize + 'static,
-	S: Selector<WasmGenome, Context> + Clone + for<'s> Deserialize<'s> + Serialize + 'static,
+	P: Problem + Into<ProblemSet> + Clone + Sync,
+	M: Mutator<WasmGenome, Context> + Clone + for<'m> Deserialize<'m> + Serialize + 'static + Send,
+	S: Selector<WasmGenome, Context> + Clone + for<'s> Deserialize<'s> + Serialize + 'static + Send,
 {
-	type Output = dyn GenAlg<G = WasmGenome, C = Context>;
+	type Output = dyn GenAlg<G = WasmGenome, C = Context> + Send;
+
+	// TODO: maybe move this? doesn't depend on P.
 	fn from_config(config: WasmGenAlgConfig<M, S>) -> Box<Self::Output> {
 		let WasmGenAlgConfig {
 			problem,
 			params,
-			// mut results, // was unused, add back in with ResultsParams of some sort
+			results: result_params,
 			output_dir,
 			// datafile,
 			// resultsfile,
 		} = config;
-		let mut results = DefaultWasmGenAlgResults::default();
-		results.datafile = Some(params::default_datafile());
-		results.resultsfile = Some(params::default_resultsfile());
+		let mut results: Vec<WasmGenAlgResults> = Vec::new();
+		if result_params.use_default {
+			results.push(Box::new({
+				let mut r = DefaultWasmGenAlgResults::default();
+				r.datafile = Some(params::default_datafile());
+				r.resultsfile = Some(params::default_resultsfile());
+				// TODO: ^ figure out why this is needed and replace. perhaps modify in default().
+				r
+			}));
+		}
+		results.extend(result_params.custom_results);
 
 		match problem {
-			ProblemSet::Sum3(p) => Box::new(WasmGenAlg::new(p, params, results)),
-			ProblemSet::Sum4(p) => Box::new(WasmGenAlg::new(p, params, results)),
-			ProblemSet::Polynom2(p) => Box::new(WasmGenAlg::new(p, params, results)),
+			ProblemSet::Sum3(p) => Box::new(WasmGenAlg::with_results(p, params, results)),
+			ProblemSet::Sum4(p) => Box::new(WasmGenAlg::with_results(p, params, results)),
+			ProblemSet::Polynom2(p) => Box::new(WasmGenAlg::with_results(p, params, results)),
 		}
 	}
 
 	fn gen_config(&self) -> WasmGenAlgConfig<M, S> {
-		let problem = ProblemSet::from(self.problem.clone());
+		let problem = self.problem.clone().into();
 		WasmGenAlgConfig {
 			problem,
 			params: self.params.clone(),
-			// results: self.results.clone(),
+			results: ResultsParams::default(), // TODO fix
 			output_dir: self.outdir.to_string_lossy().to_string(),
 			// datafile: self.results.datafile.clone().unwrap_or_default(),
 			// resultsfile: self.results.resultsfile.clone().unwrap_or_default(),
@@ -478,11 +487,20 @@ where
 	P::In: WasmParams,
 	P::Out: WasmResults,
 {
-	/// Create a new WasmGenAlg based on the given problem, parameters, and desired results.
-	pub fn new(
+	/// Create a new WasmGenAlg based on the given problem, parameters, and default results.
+	pub fn new(problem: P, params: WasmGenAlgParams<M, S>) -> Self {
+		Self::with_results(
+			problem,
+			params,
+			vec![Box::new(DefaultWasmGenAlgResults::default())],
+		)
+	}
+
+	/// Create a new WasmGenAlg based on the given problem, parameters, and any desired results.
+	pub fn with_results(
 		problem: P,
 		params: WasmGenAlgParams<M, S>,
-		results: impl Results<Genome = WasmGenome, Ctx = Context> + Send + 'static,
+		results: Vec<WasmGenAlgResults>,
 	) -> Self {
 		let size = params.pop_size;
 		let seed: u64 = params.seed.into();
@@ -495,7 +513,6 @@ where
 			}),
 			None => Box::new(|_: &mut Context, _: &[WasmGenomeId]| false),
 		};
-		let results: Vec<WasmGenAlgResults> = vec![Box::new(results)];
 		let outdir = {
 			let mut p = PathBuf::from("data");
 			p.push(problem.name());

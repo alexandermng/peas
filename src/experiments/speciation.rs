@@ -198,7 +198,8 @@ impl Experiment for SpeciationExperiment {
 					params.speciation.threshold,
 					Arc::clone(&results),
 				);
-				let ga: Self::GA = WasmGenAlg::new(problem, params, results);
+				let ga: Self::GA =
+					WasmGenAlg::with_results(problem, params, vec![Box::new(results)]);
 				log::info!("Beginning trial {id}.");
 				ga
 			})

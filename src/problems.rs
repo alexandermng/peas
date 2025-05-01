@@ -2,7 +2,7 @@ mod polynom;
 mod sum3;
 mod sum4;
 
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
 pub use polynom::Polynom;
 pub use sum3::Sum3;
@@ -76,6 +76,16 @@ impl From<Sum4> for ProblemSet {
 impl From<Polynom<2>> for ProblemSet {
 	fn from(value: Polynom<2>) -> Self {
 		ProblemSet::Polynom2(value)
+	}
+}
+
+impl Display for ProblemSet {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			ProblemSet::Sum3(_) => write!(f, "Sum3"),
+			ProblemSet::Sum4(_) => write!(f, "Sum4"),
+			ProblemSet::Polynom2(_) => write!(f, "Polynom2"),
+		}
 	}
 }
 

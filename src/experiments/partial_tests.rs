@@ -151,7 +151,8 @@ impl Experiment for PartialTestsExperiment {
 				let params = self.base_params();
 				let id = trial_count.fetch_add(1, Ordering::Relaxed);
 				let results = PartialTestsTrialResults::new(id, proportion, Arc::clone(&results));
-				let ga: Self::GA = WasmGenAlg::new(problem, params, results);
+				let ga: Self::GA =
+					WasmGenAlg::with_results(problem, params, vec![Box::new(results)]);
 				log::info!("Beginning trial {id}.");
 				ga
 			})
