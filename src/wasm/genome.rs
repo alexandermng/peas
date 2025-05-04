@@ -319,9 +319,9 @@ impl WasmGenome {
 		let out = modu.finish();
 		#[cfg(debug_assertions)]
 		if let Err(e) = wasmparser::validate(&out) {
-			log::error!("Outputting to ./invalid.wasm");
-			fs::write("invalid.wasm", &out).unwrap();
-			panic!("{e:?}");
+			log::error!("Invalid Wasm. {e}");
+			// fs::write("invalid.wasm", &out).unwrap();
+			// panic!("{e:?}");
 		}
 		out
 	}

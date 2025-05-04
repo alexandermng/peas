@@ -28,9 +28,16 @@ pub struct Sum3 {
 }
 
 impl Sum3 {
+	/// Create a new Sum3 problem instance with a given number of tests and partial test rates.
+	/// Test rates must be such that `3 * partial1_rate + 3 * partial2_rate <= 1.0`.
 	pub fn new(num: usize, partial1_rate: f64, partial2_rate: f64) -> Self {
 		// const partial1_rate: f64 = 0.1; // TODO find a way to default these
 		// const partial2_rate: f64 = 0.2;
+		#[cfg(debug_assertions)]
+		{
+			let total_partials = partial1_rate * 3.0 + partial2_rate * 3.0;
+			assert!(total_partials <= 1.0, "Test rates cannot exceed 1.0!")
+		};
 		let mut tests = Vec::with_capacity(num);
 		let partial1_tests_num = (num as f64 * partial1_rate) as usize;
 		let partial2_tests_num = (num as f64 * partial2_rate) as usize;

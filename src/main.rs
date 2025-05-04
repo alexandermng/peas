@@ -85,11 +85,20 @@ impl AvailableExperiments {
 				10,
 				num_runs_per,
 			)),
-			AvailableExperiments::PartialTests => Box::new(PartialTestsExperiment::gen_control(
-				"partial_tests",
-				0.9,
-				num_runs_per,
-			)),
+			AvailableExperiments::PartialTests => {
+				let name = format!("partial_tests_{problem}");
+				let problem = match problem.as_str() {
+					"sum3" => ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2)),
+					"sum4" => ProblemSet::Sum4(Sum4::new(100, 0.02, 0.04, 0.08)),
+					// "poly2" => ProblemSet::Polynom2(Polynom::new(100, 0.3)), // unfinished
+					_ => panic!("Unknown problem"),
+				};
+				Box::new(PartialTestsExperiment::gen_basic(
+					&name,
+					problem,
+					num_runs_per,
+				))
+			}
 			AvailableExperiments::Ablation => {
 				let name = format!("ablation_{problem}");
 				let problem = match problem.as_str() {

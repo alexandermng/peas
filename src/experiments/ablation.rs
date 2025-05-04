@@ -208,6 +208,7 @@ impl Experiment for AblationExperiment {
 			self.num_runs_per,
 			self.configurations.len() * self.num_runs_per
 		);
+		let timer = Instant::now();
 
 		let trial_count = AtomicUsize::new(0);
 		let results = Arc::new(RwLock::new(AblationExperimentResults::new()));
@@ -282,7 +283,10 @@ impl Experiment for AblationExperiment {
 			]) // final generation stats
 			.collect()
 			.unwrap();
-		log::info!("Generations:\n{gens}");
+		log::info!(
+			"Generations:\n{gens}\nTotal Experiment Time: {:.3} secs.",
+			timer.elapsed().as_secs_f64()
+		);
 
 		self.data = Some(data);
 	}

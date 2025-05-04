@@ -1,6 +1,8 @@
-//! Test the effect of degenerate/partial test cases used in the fitness function.
+//! Full PartialTests Study, including all configurations of the GA with different features turned on or off.
+//! Feature configuration parameters are found from other experiments.
 
 use std::{
+	collections::HashMap,
 	fs::{self, File},
 	iter,
 	ops::Range,
@@ -18,27 +20,40 @@ use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterato
 use serde::Serialize;
 
 use crate::{
-	genetic::{GenAlg, Results},
-	params::{GenAlgParams, SpeciesParams},
-	problems::{ProblemSet, Sum3},
+	genetic::{Configurable, GenAlg, Genome, Results},
+	params::{GenAlgParams, GenAlgParamsBuilder, ResultsParams, SpeciesParams},
+	prelude::Problem,
+	problems::{Polynom, ProblemSet, Sum3, Sum4},
 	selection::TournamentSelection,
 	wasm::{
 		mutations::{AddOperation, ChangeRoot, WasmMutationSet},
 		species::WasmSpecies,
-		Context, WasmGenAlg, WasmGenome,
+		Context, WasmGenAlg, WasmGenAlgConfig, WasmGenome,
 	},
 	Id,
 };
 
 use super::Experiment;
 
+#[derive(Debug, Clone)]
+pub struct ExperimentConfig {
+	/// Name representing the configuration parameters. Not unique across multiple trials.
+	pub label: String,
+
+	/// Problem to solve
+	pub problem: ProblemSet,
+
+	/// Input Parameters for Genetic Algorithm
+	pub params: GenAlgParams<WasmGenome, Context, WasmMutationSet, TournamentSelection>,
+}
+
 /// Tests performance based on the proportion of partial test cases. The control is with it disabled.
 pub struct PartialTestsExperiment {
 	/// How many runs to run for each configuration
 	pub num_runs_per: usize,
 
-	/// Configurations of the intended parameter to vary, in this case the problem itself, with a partial test case proportion.
-	pub configurations: Vec<ProblemSet>,
+	/// Configurations with different parameters to test
+	pub configurations: Vec<ExperimentConfig>,
 
 	// trials: Vec<<Self as Experiment>::GA>,
 	outdir: PathBuf,
@@ -50,6 +65,10 @@ pub struct PartialTestsExperiment {
 /// Overall results for the entire experiment
 #[derive(Debug, Default, Clone)]
 pub struct PartialTestsExperimentResults {
+	/// Map of trial ID to Parameter configuration
+	pub params: HashMap<usize, ExperimentConfig>,
+
+	/// Result data collated across all trials
 	pub data: DataFrame,
 }
 
@@ -58,9 +77,6 @@ pub struct PartialTestsExperimentResults {
 pub struct PartialTestsTrialResults {
 	/// Unique ID of the trial
 	pub trial_id: usize,
-
-	/// Given proportion parameter for this trial
-	pub proportion: f64,
 
 	/// Number of generations at completion
 	pub num_generations: usize,
@@ -82,7 +98,7 @@ pub struct PartialTestsTrialResults {
 }
 
 impl PartialTestsExperiment {
-	pub fn new(name: &str, num_runs_per: usize, configurations: Vec<ProblemSet>) -> Self {
+	pub fn new(name: &str, num_runs_per: usize, configurations: Vec<ExperimentConfig>) -> Self {
 		let mut outdir = PathBuf::new();
 		outdir.push("data");
 		outdir.push(name); // experiment name
@@ -95,24 +111,64 @@ impl PartialTestsExperiment {
 		}
 	}
 
-	/// Create an experiment with two configs, with speciation enabled and disabled. `onproportion` is the total partial tests proportion
-	/// to test when it's enabled. A good value is `0.9`.
-	pub fn gen_control(name: &str, onproportion: f64, num_runs_per: usize) -> Self {
-		let one_proportion = onproportion * (0.3 / 0.9) / 3.0; // 3 partial tests of 1
-		let two_proportion = onproportion * (0.6 / 0.9) / 3.0; // 3 partial tests of 2, weighted double
-		let configs = vec![
-			ProblemSet::Sum3(Sum3::new(100, 0.0, 0.0)),
-			ProblemSet::Sum3(Sum3::new(100, one_proportion, 0.0)),
-			ProblemSet::Sum3(Sum3::new(100, 0.0, two_proportion)),
-			ProblemSet::Sum3(Sum3::new(100, one_proportion, two_proportion)),
-		];
+	/// Create an experiment with a range of partial test proportions, for the given problem.
+	/// Currently the rates given in the problem are ignored.
+	pub fn gen_basic(name: &str, problem: ProblemSet, num_runs_per: usize) -> Self {
+		let base_params = {
+			let mut p = PartialTestsExperiment::new("empty", 0, vec![]).base_params(); // ugly circular, but works. will get warning, but this fixes
+			p.init_genome = problem.init_genome();
+			p
+		};
+		let problemsets = match problem {
+			ProblemSet::Sum3(orig) => vec![
+				ProblemSet::Sum3(Sum3::new(orig.num_tests, 0.0, 0.0)),
+				ProblemSet::Sum3(Sum3::new(orig.num_tests, 0.1, 0.0)),
+				ProblemSet::Sum3(Sum3::new(orig.num_tests, 0.0, 0.2)),
+				ProblemSet::Sum3(Sum3::new(orig.num_tests, 0.1, 0.2)),
+				ProblemSet::Sum3(Sum3::new(orig.num_tests, 0.2, 0.1)),
+			],
+			ProblemSet::Sum4(orig) => vec![
+				ProblemSet::Sum4(Sum4::new(orig.num_tests, 0.0, 0.0, 0.0)),
+				ProblemSet::Sum4(Sum4::new(orig.num_tests, 0.02, 0.04, 0.08)),
+				ProblemSet::Sum4(Sum4::new(orig.num_tests, 0.08, 0.04, 0.02)),
+				ProblemSet::Sum4(Sum4::new(orig.num_tests, 0.1, 0.0, 0.0)),
+				ProblemSet::Sum4(Sum4::new(orig.num_tests, 0.0, 0.1, 0.0)),
+				ProblemSet::Sum4(Sum4::new(orig.num_tests, 0.0, 0.0, 0.1)),
+				ProblemSet::Sum4(Sum4::new(orig.num_tests, 0.04, 0.04, 0.0)),
+				ProblemSet::Sum4(Sum4::new(orig.num_tests, 0.0, 0.04, 0.04)),
+				ProblemSet::Sum4(Sum4::new(orig.num_tests, 0.04, 0.0, 0.04)),
+			],
+			_ => vec![problem], // singleton
+		};
+		let configs = problemsets
+			.into_iter()
+			.map(|p| ExperimentConfig {
+				label: match &p {
+					ProblemSet::Sum3(pr) => format!(
+						"sum3_{:.1}_{:.1}",
+						pr.partial1_tests_rate, pr.partial2_tests_rate
+					),
+					ProblemSet::Sum4(pr) => format!(
+						"sum4_{:.2}_{:.2}_{:.2}",
+						pr.partial1_tests_rate, pr.partial2_tests_rate, pr.partial3_tests_rate,
+					),
+					_ => "unknown".to_owned(),
+				},
+				problem: p.clone(),
+				params: base_params.clone(),
+			})
+			.collect();
 		Self::new(name, num_runs_per, configs)
 	}
 }
 
 impl Default for PartialTestsExperiment {
 	fn default() -> Self {
-		Self::gen_control("partial_tests", 0.6, 10)
+		Self::gen_basic(
+			"partial_tests",
+			ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2)),
+			10,
+		)
 	}
 }
 
@@ -123,37 +179,42 @@ impl Experiment for PartialTestsExperiment {
 	type MutationSet = WasmMutationSet;
 	type SelectorSet = TournamentSelection;
 	type GA = WasmGenAlg<Sum3, Self::MutationSet, Self::SelectorSet>;
-	// TODO ^ fix this. rn hardcoded to sum3.
+	// TODO ^ fix this. rn hardcoded to sum3, but also not rly used rn.
 
 	fn run(&mut self) {
 		fs::create_dir_all(&self.outdir).unwrap();
 		// TODO check empty
 		log::info!(
-			"Beginning Experiment with {} configs x {} runs each ({} total).",
+			"Beginning ablation experiment on problem {} :: {} configs x {} runs each ({} total).",
+			self.configurations[0].problem, // since all configs have same problem (for now)
 			self.configurations.len(),
 			self.num_runs_per,
 			self.configurations.len() * self.num_runs_per
 		);
+		let timer = Instant::now();
 
 		let trial_count = AtomicUsize::new(0);
 		let results = Arc::new(RwLock::new(PartialTestsExperimentResults::new()));
 		self.configurations
 			.par_iter() // Lazy
 			.flat_map_iter(|c| iter::repeat_n(c, self.num_runs_per))
-			.map(|c| {
-				let (problem, proportion) = match &c {
-					ProblemSet::Sum3(sum3) => (
-						sum3.clone(),
-						sum3.partial1_tests_rate * 3.0 + sum3.partial2_tests_rate * 3.0,
-					),
-					_ => unimplemented!(),
-				};
-				let params = self.base_params();
+			.map(|cfg| {
 				let id = trial_count.fetch_add(1, Ordering::Relaxed);
-				let results = PartialTestsTrialResults::new(id, proportion, Arc::clone(&results));
-				let ga: Self::GA =
-					WasmGenAlg::with_results(problem, params, vec![Box::new(results)]);
-				log::info!("Beginning trial {id}.");
+				results.write().unwrap().params.insert(id, cfg.clone());
+				let params = cfg.params.clone();
+				let results = ResultsParams::from_single(PartialTestsTrialResults::new(
+					id,
+					Arc::clone(&results),
+				));
+				let ga = WasmGenAlg::<Sum3>::from_config(
+					WasmGenAlgConfig::builder()
+						.problem(cfg.problem.clone())
+						.params(params)
+						.results(results)
+						.output_dir(self.outdir.to_str().unwrap().to_owned())
+						.build(),
+				);
+				log::info!("Beginning trial {id} :: {}, {}", cfg.problem, cfg.label);
 				ga
 			})
 			.for_each(|mut ga| ga.run()); // Run in parallel!
@@ -164,7 +225,10 @@ impl Experiment for PartialTestsExperiment {
 			.expect("should only have one reference at this point")
 			.into_inner()
 			.unwrap();
-		let PartialTestsExperimentResults { mut data } = results;
+		let PartialTestsExperimentResults {
+			mut data,
+			params: trials,
+		} = results;
 		data.align_chunks_par(); // due to multiple vstacks
 
 		// TODO: configure output, generate graphs
@@ -181,7 +245,7 @@ impl Experiment for PartialTestsExperiment {
 			.lazy()
 			.group_by([col("trial_id")])
 			.agg([
-				col("proportion").first(),
+				col("label").first(),
 				col("generation").len().alias("num_generations"),
 				col("max_fitness").last().eq(lit(1.0)).alias("success"),
 			]) // number of generations per trial
@@ -194,7 +258,7 @@ impl Experiment for PartialTestsExperiment {
 			.unwrap();
 		let gens = gens_per_trial
 			.lazy()
-			.group_by([col("proportion").sort(Default::default())])
+			.group_by([col("label").sort(Default::default())])
 			.agg([
 				col("num_generations").mean().alias("avg_gens"),
 				col("num_generations").std(0).alias("stddev_gens"),
@@ -204,7 +268,10 @@ impl Experiment for PartialTestsExperiment {
 			]) // final generation stats
 			.collect()
 			.unwrap();
-		log::info!("Generations:\n{gens}");
+		log::info!(
+			"Generations:\n{gens}\nTotal Experiment Time: {:.3} secs.",
+			timer.elapsed().as_secs_f64()
+		);
 
 		self.data = Some(data);
 	}
@@ -216,7 +283,13 @@ impl Experiment for PartialTestsExperiment {
 			AddOperation::from_rate(0.1).into(), // local variable
 			ChangeRoot::from_rate(0.4).into(),   // consts, locals, push onto stack
 		];
-		let init = self.configurations[0].init_genome();
+		let init = if !self.configurations.is_empty() {
+			self.configurations[0].problem.clone()
+		} else {
+			log::warn!("Problem not found for init genome, defaulting to Sum3.");
+			ProblemSet::Sum3(Sum3::new(100, 0.0, 0.0))
+		}
+		.init_genome();
 		let seed: u64 = rand::rng().random();
 		GenAlgParams::builder()
 			.seed(seed)
@@ -246,30 +319,29 @@ impl PartialTestsExperimentResults {
 	pub fn new() -> Self {
 		let data = df!(
 			"trial_id" => Vec::<u32>::new(),
-			"proportion" => Vec::<f64>::new(),
+			"label" => Vec::<String>::new(),
 			"generation" => Vec::<u32>::new(),
 			"num_species" => Vec::<u32>::new(),
 			"avg_fitness" => Vec::<f64>::new(),
 			"max_fitness" => Vec::<f64>::new(),
 		)
 		.unwrap();
-		Self { data }
+		Self {
+			data,
+			params: HashMap::new(),
+		}
 	}
-	pub fn report_trial(
-		&mut self,
-		trial_id: u32,
-		proportion: f64,
-		results: &PartialTestsTrialResults,
-	) {
+	pub fn report_trial(&mut self, trial_id: u32, results: &PartialTestsTrialResults) {
 		let mut trial_data = results.to_data();
 		let ids = Series::new("trial_id".into(), vec![trial_id; trial_data.height()]);
-		let proportions = Series::new("proportion".into(), vec![proportion; trial_data.height()]);
+		let label = self.params[&(trial_id as usize)].label.clone();
+		let labels = Series::new("label".into(), vec![label.clone(); trial_data.height()]);
 		trial_data.insert_column(0, ids);
-		trial_data.insert_column(1, proportions);
+		trial_data.insert_column(1, labels);
 
 		self.data.vstack_mut_owned_unchecked(trial_data);
 		log::info!(
-			"Collected data from trial {trial_id} (proportion {proportion:.3}, {} generations).",
+			"Collected data from trial {trial_id} :: {label} ({} generations).",
 			results.num_generations
 		);
 	}
@@ -278,12 +350,10 @@ impl PartialTestsExperimentResults {
 impl PartialTestsTrialResults {
 	pub fn new(
 		trial_id: usize,
-		proportion: f64,
 		experiment_data: Arc<RwLock<PartialTestsExperimentResults>>,
 	) -> Self {
 		Self {
 			trial_id,
-			proportion,
 			num_generations: 0,
 			num_species: Vec::new(),
 			avg_fitnesses: Vec::new(),
@@ -345,7 +415,7 @@ impl Results for PartialTestsTrialResults {
 			log::error!("Lock Poison error: {p}");
 			p.into_inner()
 		});
-		exper.report_trial(self.trial_id as u32, self.proportion, self);
+		exper.report_trial(self.trial_id as u32, self);
 		log::info!(
 			"Completed trial {} ({}, {:.3} secs).",
 			self.trial_id,
