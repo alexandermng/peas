@@ -1,0 +1,11 @@
+trial_id,label,num_generations,success
+3,sum3_0.1_0.2,300,false
+0,sum3_0.0_0.0,300,false
+9,sum3_0.1_0.2,26,true
+6,sum3_0.0_0.2,16,true
+4,sum3_0.2_0.1,88,true
+1,sum3_0.1_0.0,14,true
+7,sum3_0.2_0.1,172,true
+8,sum3_0.0_0.0,300,false
+5,sum3_0.1_0.0,300,false
+2,sum3_0.0_0.2,19,true
