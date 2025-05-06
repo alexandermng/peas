@@ -4,6 +4,7 @@
 use std::{
 	collections::HashMap,
 	fs::{self, File},
+	io::Write,
 	iter,
 	ops::Range,
 	path::PathBuf,
@@ -26,6 +27,7 @@ use crate::{
 	problems::{Polynom, ProblemSet, Sum3, Sum4},
 	selection::TournamentSelection,
 	wasm::{
+		genome,
 		mutations::{AddOperation, ChangeRoot, WasmMutationSet},
 		species::WasmSpecies,
 		Context, WasmGenAlg, WasmGenAlgConfig, WasmGenome,
@@ -69,6 +71,9 @@ pub struct AblationExperimentResults {
 
 	/// Result data collated across all trials
 	pub data: DataFrame,
+
+	/// Hall of fame, keyed by trial ID
+	pub hof: HashMap<usize, Vec<u8>>,
 }
 
 /// Results for a single trial/run
@@ -243,6 +248,7 @@ impl Experiment for AblationExperiment {
 		let AblationExperimentResults {
 			mut data,
 			params: trials,
+			hof,
 		} = results;
 		data.align_chunks_par(); // due to multiple vstacks
 
@@ -287,6 +293,14 @@ impl Experiment for AblationExperiment {
 			"Generations:\n{gens}\nTotal Experiment Time: {:.3} secs.",
 			timer.elapsed().as_secs_f64()
 		);
+
+		// write out hall of fame
+		for (trial_id, genome) in hof {
+			let mut path = self.outdir.clone();
+			path.push(format!("hof_{trial_id}.wasm"));
+			let mut file = File::create(path).unwrap();
+			file.write_all(&genome).unwrap();
+		}
 
 		self.data = Some(data);
 	}
@@ -344,8 +358,10 @@ impl AblationExperimentResults {
 		Self {
 			data,
 			params: HashMap::new(),
+			hof: HashMap::new(),
 		}
 	}
+
 	pub fn report_trial(&mut self, trial_id: u32, results: &AblationTrialResults) {
 		let mut trial_data = results.to_data();
 		let ids = Series::new("trial_id".into(), vec![trial_id; trial_data.height()]);
@@ -359,6 +375,11 @@ impl AblationExperimentResults {
 			"Collected data from trial {trial_id} :: {label} ({} generations).",
 			results.num_generations
 		);
+	}
+
+	pub fn report_individual(&mut self, trial_id: u32, binary: Vec<u8>) {
+		self.hof.insert(trial_id as usize, binary);
+		// log::info!("Collected hall of fame genome for trial {trial_id}.");
 	}
 }
 
@@ -413,6 +434,12 @@ impl Results for AblationTrialResults {
 
 	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {
 		self.success = true;
+		// report individual to experiment data
+		let genome = ctx.get_genome(pop[0]).emit();
+		self.experiment_data
+			.write()
+			.unwrap()
+			.report_individual(self.trial_id as u32, genome);
 	}
 
 	fn finalize(
