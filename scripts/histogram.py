@@ -1,48 +1,60 @@
 import csv
-import sys
-import matplotlib.pyplot as plt
+import argparse
 from collections import defaultdict
+import matplotlib.pyplot as plt
 
-def plot_histogram_for_label(input_file, target_label):
-    generations = []
-    total_count = 0
-    success_count = 0
+parser = argparse.ArgumentParser(description="Plot histogram of generations for a given label.")
+parser.add_argument("label", help="Label to filter data by")
+parser.add_argument("--input_file", default="../data/ablation/generations.csv", help="Path to CSV input file")
+parser.add_argument("--successes_only", action="store_true", help="Only include successful trials in the histogram")
+args = parser.parse_args()
 
-    with open(input_file, newline='') as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            label = row['label']
-            if label != target_label:
-                continue
-            total_count += 1
-            success = row['success'].lower() == 'true'
+generations = []
+success_count = 0
+total_count = 0
+
+with open(args.input_file, newline='') as csvfile:
+    reader = csv.DictReader(csvfile)
+    for row in reader:
+        label = row['label']
+        if label != args.label:
+            continue
+
+        total_count += 1
+        success = row['success'].lower() == 'true'
+        gen = int(row['num_generations'])
+
+        if args.successes_only:
+            if success:
+                generations.append(gen)
+                success_count += 1
+        else:
+            generations.append(gen)
             if success:
                 success_count += 1
-                generations.append(int(row['num_generations']))
 
-    if not generations:
-        print(f"No successful trials found for label '{target_label}'.")
-        return
+min_gen = min(generations)
+max_gen = max(generations)
+bins = list(range(min_gen - (min_gen % 10), max_gen + 10, 10))
 
-    # Plot histogram
-    plt.figure(figsize=(10, 6))
-    min_gen = min(generations)
-    max_gen = max(generations)
-    bins = list(range(min_gen - (min_gen % 10), max_gen + 10, 10))
+plt.figure(figsize=(10, 6))
+
+if args.successes_only:
     plt.hist(generations, bins=bins, edgecolor='black')
-    plt.xlabel("Number of Generations")
-    plt.ylabel("Frequency of Successes")
-    plt.title(f"Label: {target_label} | Successes: {success_count} / {total_count}")
-    plt.grid(True)
-    plt.tight_layout()
+else:
+    counts, bin_edges, patches = plt.hist(generations, bins=bins, edgecolor='black')
+    for patch, left_edge in zip(patches, bin_edges[:-1]):
+        if 299 >= left_edge and 299 < left_edge + 10:
+            patch.set_facecolor('red')
 
-    # Save the plot
-    filename = f"{target_label}_success_histogram.png"
-    plt.savefig(filename)
-    print(f"Histogram saved as {filename}")
-    plt.show()
+plt.xlabel("Number of Generations")
+plt.ylabel("Frequency")
+title = f"Label: {args.label} | Successes: {success_count} / {total_count}"
+plt.title(title)
+plt.grid(True)
+plt.tight_layout()
 
-if __name__ == "__main__":
-    input_csv = '../data/ablation/generations.csv'
-    target_label = sys.argv[1]
-    plot_histogram_for_label(input_csv, target_label)
+filename = f"{args.label}_histogram.png"
+plt.savefig(filename)
+print(f"Histogram saved as {filename}")
+plt.show()
