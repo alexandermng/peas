@@ -12,6 +12,7 @@ def plot_trials(trials: list) -> Figure:
     fig, ax = plt.subplots(figsize=(10, 6))
 
     solvegens = [get_num_gens(t) for t in trials]
+    # solvegens = [s for s in solvegens if s <= 300]
     max_gens = max(solvegens)
     num_runs = len(trials)
 

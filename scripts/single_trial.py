@@ -1,5 +1,8 @@
+#!/usr/bin/env python3
+
 import csv
 import matplotlib.pyplot as plt
+
 
 def plot_trial(csv_file, trial_id_to_plot):
     generations = []
@@ -38,7 +41,22 @@ def plot_trial(csv_file, trial_id_to_plot):
 
     plt.show()
 
+
 if __name__ == "__main__":
-    csv_path = "../data/ablation/data.csv"
-    trial_id = 3
-    plot_trial(csv_path, trial_id)
+    import argparse
+    parser = argparse.ArgumentParser(description="Plot fitness progression for a specific trial.")
+    parser.add_argument(
+        "-c", "--csv",
+        type=str,
+        default="../data/ablation/data.csv",
+        help="Path to the CSV file containing trial data (default: ../data/ablation/data.csv)"
+    )
+    parser.add_argument(
+        "-t", "--trial",
+        type=int,
+        default=3,
+        help="Trial ID to plot (default: 3)"
+    )
+
+    args = parser.parse_args()
+    plot_trial(args.csv, args.trial)
