@@ -183,6 +183,16 @@ impl AblationExperiment {
 					params
 				},
 			},
+			ExperimentConfig {
+				label: "no_partials_no_crossover".to_owned(),
+				problem: nopartial_problem.clone(),
+				params: {
+					let mut params = base_params.clone();
+					params.crossover_rate = 0.0;
+					params.speciation.enabled = false;
+					params
+				},
+			},
 		];
 		Self::new(name, num_runs_per, configs)
 	}
@@ -277,7 +287,8 @@ impl Experiment for AblationExperiment {
 			.include_header(true)
 			.finish(&mut gens_per_trial)
 			.unwrap();
-		let gens = gens_per_trial
+		let gens_stats = gens_per_trial
+			.clone()
 			.lazy()
 			.group_by([col("label").sort(Default::default())])
 			.agg([
@@ -290,17 +301,31 @@ impl Experiment for AblationExperiment {
 			.collect()
 			.unwrap();
 		log::info!(
-			"Generations:\n{gens}\nTotal Experiment Time: {:.3} secs.",
+			"Generations:\n{gens_stats}\nTotal Experiment Time: {:.3} secs.",
 			timer.elapsed().as_secs_f64()
 		);
 
 		// write out hall of fame
+		let gens_map: HashMap<_, _> = (|| -> PolarsResult<_> {
+			let trial_id = gens_per_trial["trial_id"].u32()?.into_no_null_iter();
+			let num_gens = gens_per_trial["num_generations"].u32()?.into_no_null_iter();
+			Ok(trial_id
+				.zip(num_gens)
+				.map(|(a, b)| (a as usize, b))
+				.collect())
+		})()
+		.unwrap();
+		let hofdir = self.outdir.join("hof");
+		fs::create_dir_all(&hofdir).unwrap();
 		for (trial_id, genome) in hof {
-			let mut path = self.outdir.clone();
-			path.push(format!("hof_{trial_id}.wasm"));
+			let label = trials[&trial_id].label.as_str();
+			let eration = gens_map[&trial_id];
+			let path = hofdir.join(format!("{label}_gen{eration}_id{trial_id}.wasm"));
 			let mut file = File::create(path).unwrap();
 			file.write_all(&genome).unwrap();
 		}
+
+		// TODO manifest file giving overall experiment info (ie. problem, time taken, date run, etc.)
 
 		self.data = Some(data);
 	}
