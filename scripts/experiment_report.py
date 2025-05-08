@@ -22,17 +22,19 @@ def plot_histogram(title: str, generations: list[int], successes_only: bool = Fa
     """
     min_gen = min(generations)
     max_gen = max(generations)
-    bins = list(range(min_gen - (min_gen % 10), max_gen + 10, 10))
+    bins = list(range(0, 301, 10))
 
     plt.figure(figsize=(10, 6))
 
-    if successes_only:
-        plt.hist(generations, bins=bins, edgecolor='black')
-    else:
-        counts, bin_edges, patches = plt.hist(generations, bins=bins, edgecolor='black')
+    counts, bin_edges, patches = plt.hist(generations, bins=bins, edgecolor='black')
+    if not successes_only:
         if patches and bin_edges[-1] >= 100:
             # Color the last bin red, as long as it's above 100 gens (assuming no experiment will be over 100 gens with zero failures)
             patches[-1].set_facecolor('red')
+
+    max_y = 350 if max(counts) <= 350 else 1000
+    plt.ylim(0, max_y)
+    plt.xlim(0, 300)  # TODO unhardcode
 
     plt.xlabel("Number of Generations")
     plt.ylabel("Frequency")
@@ -54,8 +56,9 @@ def main(args):
     infile = path.join(experiment_dir, "generations.csv")
     outdir = experiment_dir
 
-    label_generations = defaultdict(list)  # generations keyed by label
+    label_generations = defaultdict(list[int])  # generations keyed by label
     label_success_counts = defaultdict(int)  # success counts keyed by label
+    label_averages = defaultdict(float)  # average generations keyed by label
 
     # Parse the CSV file
     with open(infile, newline='') as csvfile:
@@ -72,8 +75,8 @@ def main(args):
     # Histogram for each label
     print('Generating histograms:')
     for label, generations in label_generations.items():
-        experiment: str = f"{args.experiment} {label}"
-        title = f"{experiment.replace('_', ' ').title()} | Successes: {label_success_counts[label]} / {len(generations)} trials"
+        label_averages[label] = sum(generations) / len(generations)
+        title = f"Generations Taken for Full Solution, {label.replace('_',' ').title()} ({label_success_counts[label]} successful / {len(generations)} trials)"
         plot = plot_histogram(
             title,
             generations,
@@ -82,7 +85,10 @@ def main(args):
 
         filename = path.join(outdir, f"hist_{label}.png")
         plot.savefig(filename)
-        print(f"\t{label:<25} --> {filename}")
+        print(f"  {label:<25} --> {filename}")
+        print(f"\tMean generations:\t{label_averages[label]:.2f}")
+        print(f"\tMedian generations:\t{sorted(generations)[len(generations) // 2]}")
+        print(f"\tSuccess rate:\t\t{label_success_counts[label] / len(generations):.2f}")
 
 
 if __name__ == "__main__":
