@@ -4,6 +4,7 @@
 use std::{
 	collections::HashMap,
 	fs::{self, File},
+	io::Write,
 	iter,
 	ops::Range,
 	path::PathBuf,
@@ -70,6 +71,9 @@ pub struct PartialTestsExperimentResults {
 
 	/// Result data collated across all trials
 	pub data: DataFrame,
+
+	/// Hall of fame, keyed by trial ID
+	pub hof: HashMap<usize, Vec<u8>>,
 }
 
 /// Results for a single trial/run
@@ -228,6 +232,7 @@ impl Experiment for PartialTestsExperiment {
 		let PartialTestsExperimentResults {
 			mut data,
 			params: trials,
+			hof,
 		} = results;
 		data.align_chunks_par(); // due to multiple vstacks
 
@@ -257,6 +262,7 @@ impl Experiment for PartialTestsExperiment {
 			.finish(&mut gens_per_trial)
 			.unwrap();
 		let gens = gens_per_trial
+			.clone()
 			.lazy()
 			.group_by([col("label").sort(Default::default())])
 			.agg([
@@ -272,6 +278,26 @@ impl Experiment for PartialTestsExperiment {
 			"Generations:\n{gens}\nTotal Experiment Time: {:.3} secs.",
 			timer.elapsed().as_secs_f64()
 		);
+
+		// write out hall of fame
+		let gens_map: HashMap<_, _> = (|| -> PolarsResult<_> {
+			let trial_id = gens_per_trial["trial_id"].u32()?.into_no_null_iter();
+			let num_gens = gens_per_trial["num_generations"].u32()?.into_no_null_iter();
+			Ok(trial_id
+				.zip(num_gens)
+				.map(|(a, b)| (a as usize, b))
+				.collect())
+		})()
+		.unwrap();
+		let hofdir = self.outdir.join("hof");
+		fs::create_dir_all(&hofdir).unwrap();
+		for (trial_id, genome) in hof {
+			let label = trials[&trial_id].label.as_str();
+			let eration = gens_map[&trial_id];
+			let path = hofdir.join(format!("{label}_gen{eration}_id{trial_id}.wasm"));
+			let mut file = File::create(path).unwrap();
+			file.write_all(&genome).unwrap();
+		}
 
 		self.data = Some(data);
 	}
@@ -329,6 +355,7 @@ impl PartialTestsExperimentResults {
 		Self {
 			data,
 			params: HashMap::new(),
+			hof: HashMap::new(),
 		}
 	}
 	pub fn report_trial(&mut self, trial_id: u32, results: &PartialTestsTrialResults) {
@@ -344,6 +371,10 @@ impl PartialTestsExperimentResults {
 			"Collected data from trial {trial_id} :: {label} ({} generations).",
 			results.num_generations
 		);
+	}
+
+	pub fn report_individual(&mut self, trial_id: u32, binary: Vec<u8>) {
+		self.hof.insert(trial_id as usize, binary);
 	}
 }
 
@@ -401,6 +432,13 @@ impl Results for PartialTestsTrialResults {
 
 	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {
 		self.success = true;
+
+		// report individual to experiment data
+		let genome = ctx.get_genome(pop[0]).emit();
+		self.experiment_data
+			.write()
+			.unwrap()
+			.report_individual(self.trial_id as u32, genome);
 	}
 
 	fn finalize(
