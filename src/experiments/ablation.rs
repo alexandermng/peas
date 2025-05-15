@@ -115,6 +115,22 @@ impl AblationExperiment {
 		}
 	}
 
+	pub fn gen_single(label: &str, problem: ProblemSet, runs: usize) -> Self {
+		let all = AblationExperiment::gen_basic("ablation_custom_single", problem, runs);
+		let filtered_configs: Vec<_> = all
+			.configurations
+			.into_iter()
+			.filter(|config| config.label == label)
+			.collect();
+	
+		if filtered_configs.is_empty() {
+			panic!("No configuration with label '{}'", label);
+		}
+	
+		Self::new("ablation_custom_single", runs, filtered_configs)
+	}
+	
+
 	/// Basic experiment suite for a given problem.
 	pub fn gen_basic(name: &str, problem: ProblemSet, num_runs_per: usize) -> Self {
 		// let base_problem = ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2));

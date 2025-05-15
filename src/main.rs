@@ -61,6 +61,7 @@ pub enum AvailableExperiments {
 	SpeciationRange,
 	PartialTests,
 	Ablation,
+	AblationCustom,
 }
 
 type DynExperiment = dyn Experiment<
@@ -108,6 +109,16 @@ impl AvailableExperiments {
 					_ => panic!("Unknown problem"),
 				};
 				Box::new(AblationExperiment::gen_basic(&name, problem, num_runs_per))
+			}
+			AvailableExperiments::AblationCustom => {
+				let name = format!("no_partials_no_crossover");
+				let problem = match problem.as_str() {
+					"sum3" => ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2)),
+					"sum4" => ProblemSet::Sum4(Sum4::new(100, 0.02, 0.04, 0.08)),
+					"poly2" => ProblemSet::Polynom2(Polynom::new(100, 0.3)),
+					_ => panic!("Unknown problem"),
+				};
+				Box::new(AblationExperiment::gen_single(&name, problem, num_runs_per))
 			}
 		}
 	}

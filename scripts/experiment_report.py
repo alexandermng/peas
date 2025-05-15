@@ -27,13 +27,14 @@ def plot_histogram(title: str, generations: list[int], successes_only: bool = Fa
     plt.figure(figsize=(10, 6))
 
     counts, bin_edges, patches = plt.hist(generations, bins=bins, edgecolor='black')
+    max_count = max(counts)
+
     if not successes_only:
         if patches and bin_edges[-1] >= 100:
             # Color the last bin red, as long as it's above 100 gens (assuming no experiment will be over 100 gens with zero failures)
             patches[-1].set_facecolor('red')
 
-    max_y = 350 if max(counts) <= 350 else 1000
-    plt.ylim(0, max_y)
+    plt.ylim(top=max_count * 1.05)
     plt.xlim(0, 300)  # TODO unhardcode
 
     plt.xlabel("Number of Generations")
