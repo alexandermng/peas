@@ -152,8 +152,12 @@ impl Context {
 		}
 	}
 
+	/// Inserts a new genome into the context, returning its ID.
 	pub fn new_genome(&mut self, genome: WasmGenome) -> WasmGenomeId {
-		Id::from(self.genomes.insert(genome))
+		let tag = self.genomes.insert(genome);
+		let id = Id::from(tag);
+		self.genomes[tag].id = id;
+		id
 	}
 
 	pub fn get_genome(&self, id: WasmGenomeId) -> &WasmGenome {

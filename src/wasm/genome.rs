@@ -154,8 +154,12 @@ pub type WasmGenomeId = Id<WasmGenome>;
 
 /// The genome of a Wasm agent/individual, with additional genetic data. Can generate a Wasm Agent: bytecode whose
 /// phenotype is the solution for a particular problem.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct WasmGenome {
+	/// Unique ID of this genome, as tracked by the genetic algorithm. See `Context::new_genome`.
+	pub id: WasmGenomeId,
+
+	/// Actual genes of the genemoe
 	pub genes: Vec<WasmGene<'static>>,
 	/// the raw fitness of the resulting Agent
 	pub fitness: f64,
@@ -169,6 +173,9 @@ pub struct WasmGenome {
 	pub params: Vec<StackValType>,
 	pub result: Vec<StackValType>,
 	pub(crate) locals: Vec<StackValType>, // local variable types. includes params
+
+	/// Parents of this genome, if any, from crossover.
+	pub parents: Option<[WasmGenomeId; 2]>,
 }
 
 impl WasmGenome {
@@ -178,6 +185,7 @@ impl WasmGenome {
 		let result = result.to_vec();
 		let locals = params.clone();
 		WasmGenome {
+			id: WasmGenomeId::from(0), // NOTE: gets added by context
 			genes: Vec::new(),
 			fitness: 0.0,
 			adjusted_fitness: None,
@@ -187,6 +195,7 @@ impl WasmGenome {
 			params,
 			result,
 			locals,
+			parents: None,
 		}
 	}
 
@@ -230,8 +239,10 @@ impl WasmGenome {
 		// TODO: 1. find export "main" and use type to determine params/result;
 		//			 2. parse locals
 		//			 3. parse code section
+		//			 4. parse custom: fitness and parent IDs, metadata
 
 		Ok(WasmGenome {
+			id: WasmGenomeId::from(0), // NOTE: gets added by context
 			genes,
 			fitness: 0.0,
 			adjusted_fitness: None,
@@ -240,6 +251,7 @@ impl WasmGenome {
 			params,
 			result,
 			locals,
+			parents: None,
 		})
 	}
 
@@ -399,6 +411,12 @@ impl WasmGenome {
 	}
 }
 
+impl Default for WasmGenome {
+	fn default() -> Self {
+		Self::new(0, &[], &[])
+	}
+}
+
 // TODO move into SpeciesParams and... make accessible somehow
 const DIST_COEFF_EXCESS: f64 = 0.3;
 const DIST_COEFF_DISJOINT: f64 = 0.5;
@@ -457,6 +475,7 @@ impl Genome<Context> for WasmGenome {
 		}
 
 		WasmGenome {
+			id: WasmGenomeId::from(0), // NOTE: gets added by context
 			genes: child,
 			fitness: 0.0,
 			adjusted_fitness: None,
@@ -465,6 +484,7 @@ impl Genome<Context> for WasmGenome {
 			params: par_a.params.clone(),
 			result: par_a.result.clone(),
 			locals: par_a.locals.clone(),
+			parents: Some([par_a.id, par_b.id]),
 		}
 	}
 }
