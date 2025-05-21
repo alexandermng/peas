@@ -1,27 +1,27 @@
 [package]
 name = "peas"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2021"
 
 [dependencies]
-bon = "3.3.2"
-chrono = { version = "0.4.39", features = ["serde"] }
-clap = { version = "4.5.28", features = ["derive"] }
+bon = "3.6.3"
+chrono = { version = "0.4.41", features = ["serde"] }
+clap = { version = "4.5.38", features = ["derive"] }
 csv = "1.3.1"
 derive_more = { version = "2.0.1", features = ["display", "from", "into"] }
 downcast-rs = "2.0.1"
 eyre = "0.6.12"
-log = "0.4.25"
+log = "0.4.27"
 polars = { version = "0.46.0", features = ["csv", "lazy"] }
 pretty_env_logger = "0.5.0"
-rand = "0.9.0"
+rand = "0.9.1"
 rand_pcg = "0.9.0"
 rayon = "1.10.0"
-serde = { version = "1.0.214", features = ["derive"] }
-serde_json = "1.0.138"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
 slab = { version = "0.4.9", features = ["serde"] }
-toml = "0.8.19"
+toml = "0.8.22"
 # walrus = { version = "0.20.3", features = ["parallel"] }
-wasm-encoder = { version = "0.224.0", features = ["wasmparser"] }
-wasmparser = "0.224.0"
+wasm-encoder = { version = "0.230.0", features = ["wasmparser"] }
+wasmparser = "0.230.0"
 wasmtime = "29.0.1"
