@@ -1,12 +1,9 @@
 use std::fs;
 
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand};
 use eyre::eyre;
 use peas::{
-	experiments::{
-		ablation::AblationExperiment, partial_tests::PartialTestsExperiment,
-		speciation::SpeciationExperiment, Experiment,
-	},
+	experiments::{ablation, partial_tests, speciation, ExperimentConfig, ExperimentRunnable},
 	genetic::{Configurable, GenAlg},
 	params::{GenAlgParams, SpeciesParams},
 	prelude::*,
@@ -19,165 +16,103 @@ use peas::{
 };
 use rand::Rng;
 
-/// Input command-line arguments
-#[derive(clap::Parser, Debug)]
-pub struct GenAlgParamsCLI {
-	/// Experiment
-	#[arg(short, long, value_enum)]
-	pub experiment: Option<AvailableExperiments>,
-
-	/// Config filename
-	#[arg(short = 'F', long = "config")]
-	pub config: Option<String>,
+#[derive(Parser, Debug)]
+#[command(author, version, about)]
+pub struct Cli {
+	#[command(subcommand)]
+	pub experiment: ExperimentCommand,
 
 	/// Output directory name (e.g. "trial_1234.log")
-	#[arg(short, long)]
+	#[arg(short, long, global = true)]
 	pub outfile: Option<String>,
 
-	/// Problem to run. Incompatible with `--config`.
-	#[arg(short = 'p', long = "problem")]
+	/// Problem to run
+	#[arg(short = 'p', long = "problem", global = true)]
 	pub problem: Option<String>,
 
-	/// Number of trial runs per configuration. Only available when `--experiment` is set.
-	#[arg(short = 'n', long = "nruns")]
+	/// Number of trial runs per configuration
+	#[arg(short = 'n', long = "nruns", global = true)]
 	pub num_runs: Option<usize>,
 
-	/// Seed for algorithm run
-	#[arg(short = 's', long = "seed")]
-	pub seed: Option<u64>,
-
 	/// Population size
-	#[arg(long = "popsize")]
+	#[arg(long = "popsize", global = true)]
 	pub pop_size: Option<usize>,
 
-	/// Number of Generations
-	#[arg(short = 'g', long = "gens")]
+	/// Maximum number of generations cutoff
+	#[arg(short = 'g', long = "gens", global = true)]
 	pub num_generations: Option<usize>,
 }
 
-#[derive(ValueEnum, Clone, Debug)]
-pub enum AvailableExperiments {
-	SpeciationControl,
-	SpeciationRange,
+#[derive(Subcommand, Debug)]
+pub enum ExperimentCommand {
+	/// Run a single trial
+	Single {
+		/// Seed for algorithm run
+		#[arg(short = 's', long = "seed")]
+		seed: Option<u64>,
+
+		/// Config filename (for replay)
+		#[arg(short = 'F', long = "config")]
+		config: Option<String>,
+	},
+	/// Run a Speciation experiment testing different compatibility thresholds
+	Speciation,
+	/// Run a Partial Test Cases experiment, testing different rates of partial test cases
 	PartialTests,
+	/// Run an Ablation study
 	Ablation,
-	AblationCustom,
+	// TODO include/exclude specific configs
 }
 
-type DynExperiment = dyn Experiment<
-	Genome = WasmGenome,
-	Ctx = Context,
-	ProblemSet = ProblemSet,
-	MutationSet = WasmMutationSet,
-	SelectorSet = TournamentSelection,
-	GA = WasmGenAlg<Sum3, WasmMutationSet, TournamentSelection>,
->;
-impl AvailableExperiments {
-	pub fn create_experiment(&self, problem: String, num_runs_per: usize) -> Box<DynExperiment> {
+impl ExperimentCommand {
+	pub fn create_experiment(
+		&self,
+		control: ExperimentConfig,
+		problem: &str, // TODO fix this, extract from config
+		num_runs_per: usize,
+	) -> Box<dyn ExperimentRunnable> {
 		match self {
-			AvailableExperiments::SpeciationControl => Box::new(SpeciationExperiment::gen_control(
-				"speciation_control",
-				2.0,
-				num_runs_per,
-			)),
-			AvailableExperiments::SpeciationRange => Box::new(SpeciationExperiment::gen_linspace(
-				"speciation_range",
+			ExperimentCommand::Speciation => Box::new(speciation::gen_linspace(
+				"speciation_threshold",
+				control,
 				1.5..2.5,
 				10,
 				num_runs_per,
 			)),
-			AvailableExperiments::PartialTests => {
+			ExperimentCommand::PartialTests => {
 				let name = format!("partial_tests_{problem}");
-				let problem = match problem.as_str() {
-					"sum3" => ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2)),
-					"sum4" => ProblemSet::Sum4(Sum4::new(100, 0.02, 0.04, 0.08)),
-					// "poly2" => ProblemSet::Polynom2(Polynom::new(100, 0.3)), // unfinished
-					_ => panic!("Unknown problem"),
-				};
-				Box::new(PartialTestsExperiment::gen_basic(
-					&name,
-					problem,
-					num_runs_per,
-				))
+				Box::new(partial_tests::gen_basic(&name, control, num_runs_per))
 			}
-			AvailableExperiments::Ablation => {
+			ExperimentCommand::Ablation => {
 				let name = format!("ablation_{problem}");
-				let problem = match problem.as_str() {
-					"sum3" => ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2)),
-					"sum4" => ProblemSet::Sum4(Sum4::new(100, 0.02, 0.04, 0.08)),
-					"poly2" => ProblemSet::Polynom2(Polynom::new(100, 0.3)),
-					_ => panic!("Unknown problem"),
-				};
-				Box::new(AblationExperiment::gen_basic(&name, problem, num_runs_per))
+				Box::new(ablation::gen_basic(&name, control, num_runs_per))
 			}
-			AvailableExperiments::AblationCustom => {
-				let name = format!("no_partials_no_crossover");
-				let problem = match problem.as_str() {
-					"sum3" => ProblemSet::Sum3(Sum3::new(100, 0.1, 0.2)),
-					"sum4" => ProblemSet::Sum4(Sum4::new(100, 0.02, 0.04, 0.08)),
-					"poly2" => ProblemSet::Polynom2(Polynom::new(100, 0.3)),
-					_ => panic!("Unknown problem"),
-				};
-				Box::new(AblationExperiment::gen_single(&name, problem, num_runs_per))
-			}
+			_ => panic!("create_experiment called on Single variant"),
 		}
 	}
 }
 
-fn main() -> eyre::Result<()> {
-	pretty_env_logger::init();
-
-	let args = GenAlgParamsCLI::parse();
-
-	// Pre-configured Experiments
-	if let Some(experiment) = args.experiment {
-		let problem = args.problem.unwrap_or_else(|| String::from("sum3"));
-		let num_runs = args.num_runs.unwrap_or(10);
-
-		let mut exper = experiment.create_experiment(problem, num_runs);
-		exper.run();
-
-		return Ok(());
-	}
-
-	if let Some(filename) = args.config {
-		// replay a run
-		let contents = fs::read_to_string(filename)?;
-		let mut config: WasmGenAlgConfig<WasmMutationSet, TournamentSelection> =
-			toml::from_str(&contents)?;
-		if let Some(of) = args.outfile {
-			// mem::take?
-			config.output_dir = of;
-		}
-		// TODO be able to pull in an init.wasm or smthn.
-		config.params.init_genome = config.problem.init_genome();
-		let mut ga = WasmGenAlg::<Sum3>::from_config(config);
-		ga.run();
-		return Ok(());
-	}
-
-	let problem = args.problem.unwrap_or_else(|| String::from("sum3"));
-	let num_tests = 100; // TODO put in args. or even better, put in ProblemParams
-	let problem = match &*problem {
-		"sum3" => ProblemSet::Sum3(Sum3::new(num_tests, 0.1, 0.2)),
-		"sum4" => ProblemSet::Sum4(Sum4::new(num_tests, 0.02, 0.04, 0.08)),
-		"poly2" => ProblemSet::Polynom2(Polynom::new(num_tests, 0.3)),
-		_ => return Err(eyre!("Unknown problem")),
-	};
+/// Helper to construct base params from CLI args
+fn base_params(
+	problem: &ProblemSet,
+	cli: &Cli,
+	seed: Option<u64>,
+) -> GenAlgParams<WasmGenome, Context, WasmMutationSet, TournamentSelection> {
+	let num_tests = 100; // TODO: put in args or ProblemParams
 	let init = problem.init_genome();
 	let muts: Vec<WasmMutationSet> = vec![
-		AddOperation::from_rate(0.1).into(), // local variable
-		ChangeRoot::from_rate(0.4).into(),   // consts, locals, push onto stack
+		AddOperation::from_rate(0.1).into(),
+		ChangeRoot::from_rate(0.4).into(),
 	];
-	let seed = args.seed.unwrap_or_else(|| rand::rng().random());
-	let params = GenAlgParams::builder()
+	let seed = seed.unwrap_or_else(|| rand::rng().random());
+	GenAlgParams::builder()
 		.seed(seed)
-		.pop_size(args.pop_size.unwrap_or(100))
-		.num_generations(args.num_generations.unwrap_or(100))
+		.pop_size(cli.pop_size.unwrap_or(100))
+		.num_generations(cli.num_generations.unwrap_or(100))
 		.max_fitness(1.0)
 		.mutators(muts)
 		.mutation_rate(1.0)
-		.selector(TournamentSelection::new(0.6, 2, 0.9, true)) // can do real tournament selection when selection is fixed
+		.selector(TournamentSelection::new(0.6, 2, 0.9, true))
 		.speciation(SpeciesParams {
 			enabled: true,
 			threshold: 2.0,
@@ -186,20 +121,61 @@ fn main() -> eyre::Result<()> {
 		.init_genome(init)
 		.elitism_rate(0.05)
 		.crossover_rate(0.8)
-		.build();
-	match problem {
-		//.... hey. it works.
-		ProblemSet::Sum3(p) => {
-			let mut ga = WasmGenAlg::new(p, params);
-			ga.run();
+		.build()
+}
+
+fn main() -> eyre::Result<()> {
+	pretty_env_logger::init();
+
+	let cli = Cli::parse();
+
+	let problem_str = cli.problem.clone().unwrap_or_else(|| String::from("sum3"));
+	let num_tests = 100; // TODO: put in args or ProblemParams
+	let problem = match &*problem_str {
+		"sum3" => ProblemSet::Sum3(Sum3::new(num_tests, 0.1, 0.2)),
+		"sum4" => ProblemSet::Sum4(Sum4::new(num_tests, 0.02, 0.04, 0.08)),
+		"poly2" => ProblemSet::Polynom2(Polynom::new(num_tests, 0.3)),
+		_ => return Err(eyre!("Unknown problem")),
+	};
+
+	match &cli.experiment {
+		ExperimentCommand::Single { seed, config } => {
+			if let Some(filename) = config {
+				// replay a run
+				let contents = fs::read_to_string(filename)?;
+				let mut config: WasmGenAlgConfig<WasmMutationSet, TournamentSelection> =
+					toml::from_str(&contents)?;
+				if let Some(of) = cli.outfile.clone() {
+					config.output_dir = of;
+				}
+				config.params.init_genome = config.problem.init_genome();
+				let mut ga = WasmGenAlg::<Sum3>::from_config(config);
+				ga.run();
+				return Ok(());
+			}
+
+			let params = base_params(&problem, &cli, *seed);
+			match problem {
+				ProblemSet::Sum3(p) => {
+					let mut ga = WasmGenAlg::new(p, params);
+					ga.run();
+				}
+				ProblemSet::Sum4(p) => {
+					let mut ga = WasmGenAlg::new(p, params);
+					ga.run();
+				}
+				ProblemSet::Polynom2(p) => {
+					let mut ga = WasmGenAlg::new(p, params);
+					ga.run();
+				}
+			}
 		}
-		ProblemSet::Sum4(p) => {
-			let mut ga = WasmGenAlg::new(p, params);
-			ga.run();
-		}
-		ProblemSet::Polynom2(p) => {
-			let mut ga = WasmGenAlg::new(p, params);
-			ga.run();
+		other => {
+			let base_params = base_params(&problem, &cli, None);
+			let num_runs = cli.num_runs.unwrap_or(10);
+			let control = ExperimentConfig::new("control", problem, base_params);
+			let mut exper = other.create_experiment(control, &problem_str, num_runs);
+			exper.run();
 		}
 	}
 

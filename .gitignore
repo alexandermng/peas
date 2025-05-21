@@ -5,7 +5,8 @@
 # Build artefacts
 /target
 
-# Trial Logs
+# Experiment logs
+data/
 trial_*/
 
 # Python

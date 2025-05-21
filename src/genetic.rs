@@ -1,15 +1,9 @@
 //! Genetic Algorithm Types
 
-use std::{
-	cell::{Cell, RefCell},
-	collections::HashSet,
-	fmt::Debug,
-	marker::PhantomData,
-	path::Path,
-};
+use std::{cell::RefCell, marker::PhantomData, path::Path};
 
+use downcast_rs::{impl_downcast, Downcast};
 use rand::Rng;
-use serde::Serialize;
 
 use crate::Id;
 
@@ -20,7 +14,7 @@ pub trait GenAlg {
 	type C: AsContext;
 
 	/// Run the full algorithm.
-	fn run(&mut self);
+	fn run(&mut self) -> Vec<DynResults<Self::G, Self::C>>;
 
 	// fn reset(&mut self);
 
@@ -135,7 +129,7 @@ pub trait AsContext {
 // }
 
 /// Aggregates results from the run. Define hooks to record data.
-pub trait Results {
+pub trait Results: Downcast {
 	type Genome: Genome<Self::Ctx>;
 	type Ctx: AsContext;
 
@@ -160,6 +154,9 @@ pub trait Results {
 	/// Finalize results and write to files. `outdir` should contain any artefacts.
 	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>], outdir: &Path) {}
 }
+impl_downcast!(Results assoc Genome, Ctx where Genome: crate::genetic::Genome<Ctx>, Ctx: AsContext);
+
+pub type DynResults<G, C> = Box<dyn Results<Genome = G, Ctx = C> + Send + Sync>;
 
 // /// Default impl for Results. See trait-level docs.
 // #[derive(Default, Debug, Serialize, Clone)]

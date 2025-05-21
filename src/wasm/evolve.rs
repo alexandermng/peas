@@ -1,50 +1,37 @@
 use std::{
-	any::Any,
-	borrow::{Borrow, BorrowMut},
-	cell::{RefCell, RefMut},
-	collections::{HashMap, HashSet},
-	fs,
-	hash::{DefaultHasher, Hash, Hasher},
-	marker::PhantomData,
-	mem,
-	ops::{Index, IndexMut, Range},
+	borrow::Borrow,
+	cell::RefCell,
+	collections::HashMap,
+	fs, mem,
+	ops::{Index, IndexMut},
 	path::{Path, PathBuf},
 	time::Instant,
 };
 
-use bon::{builder, Builder};
 use csv::Writer;
-use eyre::{eyre, DefaultHandler, Error, OptionExt, Result, WrapErr};
+use eyre::eyre;
 use rand::{
 	distr::{Distribution, Uniform},
-	seq::{IndexedRandom, SliceRandom},
+	seq::IndexedRandom,
 	Rng, SeedableRng,
 };
 use rand_pcg::Pcg64Mcg;
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use slab::Slab;
-use wasm_encoder::{Instruction, ValType};
-use wasmtime::{Engine, Instance, Linker, Module, Store, WasmParams, WasmResults, WasmTy};
+use wasmtime::{Engine, Linker, Module, Store, WasmParams, WasmResults};
 
-use crate::{
-	genetic::{
-		self, Configurable, ConfiguredGenAlg, GenAlg, Genome, Mutator, OnceMutator, Predicate,
-		Selector, Species,
-	},
-	params::{self, ResultsParams},
-	problems::{Problem, ProblemSet, Solution, Sum3},
-	wasm::GeneDiff,
-	Id,
-};
 use crate::{
 	genetic::{AsContext, Results},
 	params::{GenAlgConfig, GenAlgParams},
 	selection::TournamentSelection,
-	wasm::{
-		genome::{InnovNum, StackValType, WasmGene, WasmGenome},
-		mutations::AddOperation,
-	},
+	wasm::genome::{InnovNum, WasmGenome},
+};
+use crate::{
+	genetic::{Configurable, DynResults, GenAlg, Genome, Mutator, Predicate, Selector, Species},
+	params::{self, ResultsParams},
+	problems::{Problem, ProblemSet, Solution},
+	Id,
 };
 
 use super::{
@@ -741,7 +728,7 @@ where
 	type G = WasmGenome;
 	type C = Context;
 
-	fn run(&mut self) {
+	fn run(&mut self) -> Vec<DynResults<Self::G, Self::C>> {
 		log::info!("Beginning GA trial with seed {}", self.seed);
 
 		fs::create_dir_all(&self.outdir).unwrap();
@@ -782,6 +769,8 @@ where
 		for r in &mut self.results {
 			r.finalize(self.ctx.get_mut(), &self.pop, &self.outdir);
 		}
+
+		mem::take(&mut self.results)
 	}
 
 	fn epoch(&mut self) -> bool {
