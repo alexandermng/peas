@@ -13,7 +13,7 @@ use std::{
 	time::Instant,
 };
 
-use downcast_rs::Downcast;
+use downcast_rs::{impl_downcast, Downcast};
 use polars::prelude::*;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
@@ -31,7 +31,10 @@ use crate::{
 
 /// Trait for experiment result aggregation and output.
 pub trait ExperimentResults: Default + Send + Sync + 'static {
-	type TrialResults: Results + Any;
+	type TrialResults: ExperimentTrialResults;
+
+	/// Initialize the results for a new trial.
+	fn register(&mut self, trial_id: usize, label: String);
 
 	/// Collect results from a single trial.
 	fn collect(&mut self, trial: &Self::TrialResults);
@@ -39,6 +42,19 @@ pub trait ExperimentResults: Default + Send + Sync + 'static {
 	/// Output all results to disk.
 	fn output(&mut self, outdir: &Path);
 }
+
+/// Wrapper trait for trial Results. For use as `Box<dyn ExperimentTrialResults>`.
+pub trait ExperimentTrialResults:
+	Results<Genome = WasmGenome, Ctx = Context> + Downcast + Any + Send + Sync
+{
+	fn new(trial_id: usize) -> Self
+	where
+		Self: Sized;
+}
+// impl<T> ExperimentTrialResults for T where
+// 	T: Results<Genome = WasmGenome, Ctx = Context> + Send + Sync
+// {}
+impl_downcast!(ExperimentTrialResults);
 
 /// An experiment to run, generic over the outputted results type.
 pub struct Experiment<R: ExperimentResults> {
@@ -81,10 +97,17 @@ impl<R: ExperimentResults> Experiment<R> {
 				.flat_map_iter(|c| std::iter::repeat_n(c, self.num_runs_per))
 				.map(|cfg| {
 					let id = trial_count.fetch_add(1, Ordering::Relaxed);
+					results.write().unwrap().register(id, cfg.label.clone());
 					let params = cfg.params.clone();
-					let trial_results = DefaultTrialResults::new(id); // TODO fix into R::TrialResults
-					let results = ResultsParams::from_single(trial_results.clone());
-					let ga = WasmGenAlg::<Sum3>::from_config(
+					let trial_results = R::TrialResults::new(id);
+					let results = ResultsParams::from_single(trial_results);
+					// let ga = WasmGenAlg::<
+					// 	Sum3,
+					// 	WasmMutationSet,
+					// 	TournamentSelection,
+					// 	Box<dyn ExperimentTrialResults>,
+					// >::from_config(
+					let ga = WasmGenAlg::<()>::from_config(
 						WasmGenAlgConfig::builder()
 							.problem(cfg.problem.clone())
 							.params(params)
@@ -92,15 +115,23 @@ impl<R: ExperimentResults> Experiment<R> {
 							.output_dir(self.outdir.to_str().unwrap().to_owned())
 							.build(),
 					);
-					log::info!("Beginning trial {id} :: {}, {}", cfg.problem, cfg.label);
 					(ga, id)
 				})
 				.for_each(|(mut ga, id)| {
 					let trial_results = ga.run();
+					log::debug!("Received {} results from trial {id}", trial_results.len());
 					for res in trial_results {
-						// FIXME: big bug, data collection not being run.
-						if let Some(r) = res.as_any().downcast_ref::<R::TrialResults>() {
-							results.write().unwrap().collect(r);
+						// TODO fix this shit
+						if let Some(r) = res.as_experiment_results() {
+							if let Some(r) = r.downcast_ref::<R::TrialResults>() {
+								results.write().unwrap().collect(r);
+							} else {
+								log::debug!("Failed downcast &dyn ExperimentTrialResults to R::TrialResults ({})", std::any::type_name::<R::TrialResults>());
+							}
+						} else {
+							log::debug!(
+								"Failed downcast Box<Results> to &dyn ExperimentTrialResults"
+							);
 						}
 					}
 				});
@@ -222,19 +253,6 @@ pub struct DefaultTrialResults {
 }
 
 impl DefaultTrialResults {
-	pub fn new(trial_id: usize) -> Self {
-		Self {
-			trial_id,
-			num_generations: 0,
-			num_species: Vec::new(),
-			avg_fitnesses: Vec::new(),
-			max_fitnesses: Vec::new(),
-			time_taken: 0.0,
-			success: false,
-			hof: None,
-		}
-	}
-
 	pub fn to_data(&self) -> DataFrame {
 		let generations: Vec<u32> = (0..(self.num_generations as u32)).collect();
 		let num_species = if self.num_species.is_empty() {
@@ -250,6 +268,21 @@ impl DefaultTrialResults {
 			Column::new("max_fitness".into(), &self.max_fitnesses),
 		])
 		.unwrap()
+	}
+}
+
+impl ExperimentTrialResults for DefaultTrialResults {
+	fn new(trial_id: usize) -> Self {
+		Self {
+			trial_id,
+			num_generations: 0,
+			num_species: Vec::new(),
+			avg_fitnesses: Vec::new(),
+			max_fitnesses: Vec::new(),
+			time_taken: 0.0,
+			success: false,
+			hof: None,
+		}
 	}
 }
 

@@ -17,10 +17,10 @@ use crate::{
 pub type PartialTestsExperiment = Experiment<PartialTestsExperimentResults>;
 
 /// Overall results for the entire experiment
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct PartialTestsExperimentResults {
 	/// Map of trial ID to Parameter configuration
-	pub params: HashMap<usize, ExperimentConfig>,
+	pub params: HashMap<usize, String>,
 
 	/// Result data collated across all trials
 	pub data: DataFrame,
@@ -98,8 +98,8 @@ pub fn gen_custom(
 	out
 }
 
-impl PartialTestsExperimentResults {
-	pub fn new() -> Self {
+impl Default for PartialTestsExperimentResults {
+	fn default() -> Self {
 		let data = df!(
 			"trial_id" => Vec::<u32>::new(),
 			"label" => Vec::<String>::new(),
@@ -120,11 +120,16 @@ impl PartialTestsExperimentResults {
 impl ExperimentResults for PartialTestsExperimentResults {
 	type TrialResults = DefaultTrialResults;
 
+	fn register(&mut self, trial_id: usize, label: String) {
+		log::info!("Beginning trial {trial_id}/{label}");
+		self.params.insert(trial_id, label);
+	}
+
 	fn collect(&mut self, trial: &Self::TrialResults) {
 		let mut trial_data = trial.to_data();
 		let trial_id = trial.trial_id as u32;
 		let ids = Series::new("trial_id".into(), vec![trial_id; trial_data.height()]);
-		let label = self.params[&trial.trial_id].label.clone();
+		let label = self.params[&trial.trial_id].clone();
 		let labels = Series::new("label".into(), vec![label.clone(); trial_data.height()]);
 		trial_data.insert_column(0, ids);
 		trial_data.insert_column(1, labels);
@@ -135,7 +140,7 @@ impl ExperimentResults for PartialTestsExperimentResults {
 		}
 
 		log::info!(
-			"Completed trial {trial_id} :: {label}\t({:.3}s, {} gens)",
+			"Completed trial {trial_id}/{label}\t({:.3}s, {} gens)",
 			trial.time_taken,
 			trial.num_generations
 		);
@@ -187,7 +192,7 @@ impl ExperimentResults for PartialTestsExperimentResults {
 			])
 			.collect()
 			.unwrap();
-		log::info!("Generations:\n{gens_stats}");
+		log::info!("Overview:\n{gens_stats}");
 
 		let gens_map: HashMap<_, _> = (|| -> PolarsResult<_> {
 			let trial_id = gens_per_trial["trial_id"].u32()?.into_no_null_iter();
@@ -201,7 +206,7 @@ impl ExperimentResults for PartialTestsExperimentResults {
 		let hofdir = outdir.join("hof");
 		fs::create_dir_all(&hofdir).unwrap();
 		for (trial_id, genome) in hof {
-			let label = trials[&trial_id].label.as_str();
+			let label = trials[&trial_id].as_str();
 			let eration = gens_map[&trial_id];
 			let path = hofdir.join(format!("{label}_gen{eration}_id{trial_id}.wasm"));
 			let mut file = File::create(path).unwrap();

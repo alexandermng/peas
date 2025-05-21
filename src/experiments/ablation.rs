@@ -15,10 +15,10 @@ use super::{DefaultTrialResults, Experiment, ExperimentConfig, ExperimentResults
 pub type AblationExperiment = Experiment<AblationExperimentResults>;
 
 /// Overall results for the entire experiment
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct AblationExperimentResults {
-	/// Map of trial ID to Parameter configuration
-	pub params: HashMap<usize, ExperimentConfig>,
+	/// Map of trial ID to config label
+	pub params: HashMap<usize, String>,
 
 	/// Result data collated across all trials
 	pub data: DataFrame,
@@ -64,8 +64,8 @@ pub fn gen_custom(
 	out
 }
 
-impl AblationExperimentResults {
-	pub fn new() -> Self {
+impl Default for AblationExperimentResults {
+	fn default() -> Self {
 		let data = df!(
 			"trial_id" => Vec::<u32>::new(),
 			"label" => Vec::<String>::new(),
@@ -86,16 +86,39 @@ impl AblationExperimentResults {
 impl ExperimentResults for AblationExperimentResults {
 	type TrialResults = DefaultTrialResults;
 
+	fn register(&mut self, trial_id: usize, label: String) {
+		log::info!("Beginning trial {trial_id}/{label}");
+		self.params.insert(trial_id, label);
+	}
+
 	fn collect(&mut self, trial: &Self::TrialResults) {
 		// Add trial data to dataframe
 		let mut trial_data = trial.to_data();
 		let trial_id = trial.trial_id as u32;
 		let ids = Series::new("trial_id".into(), vec![trial_id; trial_data.height()]);
-		let label = self.params[&trial.trial_id].label.clone();
+		let label = self.params[&trial.trial_id].clone();
 		let labels = Series::new("label".into(), vec![label.clone(); trial_data.height()]);
 		trial_data.insert_column(0, ids);
 		trial_data.insert_column(1, labels);
-		self.data.vstack_mut_owned_unchecked(trial_data);
+		#[cfg(debug_assertions)]
+		{
+			let trial_height = trial_data.height();
+			let trial_width = trial_data.width();
+			let pre_height = self.data.height();
+			let pre_width = self.data.width();
+			assert_eq!(
+				trial_width, pre_width,
+				"Vstacked data has different number of columns"
+			);
+			self.data.vstack_mut_owned_unchecked(trial_data);
+			let post_height = self.data.height();
+			let post_width = self.data.width();
+			log::debug!("Vstacked {label}({trial_id}) data {trial_height}x{trial_width}\t({pre_height}x{pre_width} -> {post_height}x{post_width})");
+		}
+		#[cfg(not(debug_assertions))]
+		{
+			self.data.vstack_mut_owned_unchecked(trial_data);
+		}
 
 		// Add hof genome if present
 		if let Some(ref genome) = trial.hof {
@@ -103,7 +126,7 @@ impl ExperimentResults for AblationExperimentResults {
 		}
 
 		log::info!(
-			"Completed trial {trial_id} :: {label}\t({:.3}s, {} gens)",
+			"Completed trial {trial_id}/{label}\t({:.3}s, {} gens)",
 			trial.time_taken,
 			trial.num_generations
 		);
@@ -115,6 +138,7 @@ impl ExperimentResults for AblationExperimentResults {
 			params: trials,
 			hof,
 		} = self;
+		let mut data = data.clone();
 		data.align_chunks_par(); // due to multiple vstacks
 
 		// TODO: configure output, generate graphs
@@ -122,11 +146,10 @@ impl ExperimentResults for AblationExperimentResults {
 		let mut file = File::create(datafile).unwrap();
 		CsvWriter::new(&mut file)
 			.include_header(true)
-			.finish(data)
+			.finish(&mut data)
 			.unwrap();
 
 		// let fail_gens = self.base_params().num_generations as f64;
-		log::info!("Data:\n{data}");
 		let mut gens_per_trial = data
 			.clone()
 			.lazy()
@@ -156,7 +179,7 @@ impl ExperimentResults for AblationExperimentResults {
 			]) // final generation stats
 			.collect()
 			.unwrap();
-		log::info!("Generations:\n{gens_stats}");
+		log::info!("Overview:\n{gens_stats}");
 
 		// write out hall of fame
 		let gens_map: HashMap<_, _> = (|| -> PolarsResult<_> {
@@ -171,7 +194,7 @@ impl ExperimentResults for AblationExperimentResults {
 		let hofdir = outdir.join("hof");
 		fs::create_dir_all(&hofdir).unwrap();
 		for (trial_id, genome) in hof {
-			let label = trials[&trial_id].label.as_str();
+			let label = trials[&trial_id].as_str();
 			let eration = gens_map[&trial_id];
 			let path = hofdir.join(format!("{label}_gen{eration}_id{trial_id}.wasm"));
 			let mut file = File::create(path).unwrap();

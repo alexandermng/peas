@@ -22,7 +22,7 @@ use slab::Slab;
 use wasmtime::{Engine, Linker, Module, Store, WasmParams, WasmResults};
 
 use crate::{
-	genetic::{AsContext, Results},
+	genetic::{AsContext, GenAlgRunnable, Results},
 	params::{GenAlgConfig, GenAlgParams},
 	selection::TournamentSelection,
 	wasm::genome::{InnovNum, WasmGenome},
@@ -385,16 +385,17 @@ pub type WasmGenAlgResults = Box<dyn Results<Genome = WasmGenome, Ctx = Context>
 
 /// A genetic algorithm for synthesizing WebAssembly modules to solve a problem. The problem must specify
 /// a fitness function. Parametrized across the problem, the mutation type, and the selection type.
-pub struct WasmGenAlg<P, M = WasmMutationSet, S = TournamentSelection>
+pub struct WasmGenAlg<P, M = WasmMutationSet, S = TournamentSelection, R = WasmGenAlgResults>
 where
 	P: Problem,
 	M: Mutator<WasmGenome, Context>,
 	S: Selector<WasmGenome, Context>,
+	R: Results<Genome = WasmGenome, Ctx = Context>,
 {
 	// Parameters
 	pub problem: P,
 	pub params: WasmGenAlgParams<M, S>,
-	pub results: Vec<WasmGenAlgResults>,
+	pub results: Vec<R>,
 
 	mutators: Vec<M>,        // copied from params
 	selector: S,             // copied from params
@@ -418,7 +419,7 @@ where
 	M: Mutator<WasmGenome, Context> + Clone + for<'m> Deserialize<'m> + Serialize + 'static + Send,
 	S: Selector<WasmGenome, Context> + Clone + for<'s> Deserialize<'s> + Serialize + 'static + Send,
 {
-	type Output = dyn GenAlg<G = WasmGenome, C = Context> + Send;
+	type Output = dyn GenAlgRunnable<Genome = WasmGenome, Ctx = Context>;
 
 	// TODO: maybe move this? doesn't depend on P.
 	fn from_config(config: WasmGenAlgConfig<M, S>) -> Box<Self::Output> {

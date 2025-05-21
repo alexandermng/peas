@@ -127,3 +127,26 @@ impl ProblemSet {
 		}
 	}
 }
+
+/// Empty problem for testing purposes.
+impl Problem for () {
+	type In = ();
+	type Out = ();
+
+	fn fitness(&self, soln: impl Solution<Self>) -> f64
+	where
+		Self: Sized,
+	{
+		unimplemented!("fitness not implemented for empty problem")
+	}
+
+	fn name(&self) -> &'static str {
+		"empty"
+	}
+}
+
+impl From<()> for ProblemSet {
+	fn from(_: ()) -> Self {
+		unimplemented!("empty problem not included in ProblemSet")
+	}
+}

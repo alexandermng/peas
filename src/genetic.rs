@@ -5,7 +5,10 @@ use std::{cell::RefCell, marker::PhantomData, path::Path};
 use downcast_rs::{impl_downcast, Downcast};
 use rand::Rng;
 
-use crate::Id;
+use crate::{
+	experiments::{self, ExperimentTrialResults},
+	Id,
+};
 
 /// Represents a genetic algorithm, which must implement these genetic operators, for a given Genome type.
 /// It holds parameters for these operators and keeps track of its current population through generations.
@@ -39,11 +42,34 @@ pub trait GenAlg {
 	/// Crosses over / recombines two parent individuals to generate a new child individual.
 	fn crossover(&self, a: Id<Self::G>, b: Id<Self::G>) -> Self::G;
 }
+
+/// Wrapper trait to run a constructed genetic algorithm, erasing type args. For use as `dyn GenAlgRunnable`.
+pub trait GenAlgRunnable: Send {
+	type Genome: Genome<Self::Ctx>;
+	type Ctx: AsContext;
+
+	fn run(&mut self) -> Vec<DynResults<Self::Genome, Self::Ctx>>;
+}
+
+impl<T, G, C> GenAlgRunnable for T
+where
+	T: GenAlg<G = G, C = C> + Send,
+	G: Genome<C>,
+	C: AsContext,
+{
+	type Genome = G;
+	type Ctx = C;
+
+	fn run(&mut self) -> Vec<DynResults<G, C>> {
+		GenAlg::run(self)
+	}
+}
+
 pub trait ConfiguredGenAlg<C>: GenAlg + Configurable<C> {}
 impl<T, C> ConfiguredGenAlg<C> for T where T: GenAlg + Configurable<C> {}
 
 pub trait Configurable<C> {
-	type Output: GenAlg + ?Sized;
+	type Output: GenAlgRunnable + ?Sized;
 	/// Creates the object from a config
 	fn from_config(config: C) -> Box<Self::Output>;
 
@@ -153,33 +179,47 @@ pub trait Results: Downcast {
 
 	/// Finalize results and write to files. `outdir` should contain any artefacts.
 	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>], outdir: &Path) {}
+
+	/// Dirty hack to downcast to ExperimentTrialResults
+	/// TODO fix this shit
+	fn as_experiment_results(&self) -> Option<&dyn ExperimentTrialResults> {
+		self.as_any()
+			.downcast_ref::<experiments::DefaultTrialResults>()
+			.map(|r| r as &dyn ExperimentTrialResults)
+	}
 }
 impl_downcast!(Results assoc Genome, Ctx where Genome: crate::genetic::Genome<Ctx>, Ctx: AsContext);
 
 pub type DynResults<G, C> = Box<dyn Results<Genome = G, Ctx = C> + Send + Sync>;
 
-// /// Default impl for Results. See trait-level docs.
-// #[derive(Default, Debug, Serialize, Clone)]
-// pub struct DefaultResults<G> {
-// 	success: bool, // whether it found a solution
-// 	num_generations: usize, // how many generations it ran for
-// 	max_fitnesses: Vec<u64>, // top fitness for each generation
-// 	avg_fitnesses: Vec<u64>, // mean fitness for each generation
-// }
+impl<T: Results + ?Sized> Results for Box<T> {
+	type Ctx = T::Ctx;
+	type Genome = T::Genome;
 
-// impl<G> Results<G> for DefaultResults<G> {
-// 	fn record_generation(&mut self, alg: &mut G) {
-// 			// TODO need alg to expose population
-// 	}
+	fn initialize(&mut self, ctx: &mut Self::Ctx) {
+		self.as_mut().initialize(ctx)
+	}
+	fn record_generation(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {
+		self.as_mut().record_generation(ctx, pop)
+	}
+	fn record_speciation(
+		&mut self,
+		ctx: &mut Self::Ctx,
+		species: &[Id<crate::wasm::species::WasmSpecies>],
+	) {
+		self.as_mut().record_speciation(ctx, species)
+	}
+	fn record_success(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>]) {
+		self.as_mut().record_success(ctx, pop)
+	}
+	fn finalize(&mut self, ctx: &mut Self::Ctx, pop: &[Id<Self::Genome>], outdir: &Path) {
+		self.as_mut().finalize(ctx, pop, outdir)
+	}
 
-// 	fn record_success(&mut self, alg: &mut G) {
-// 			self.success = true;
-// 	}
-
-// 	fn finalize(&mut self, alg: &mut G) {
-// 			self.num_generations = 0; // TODO need alg to expose params
-// 	}
-// }
+	fn as_experiment_results(&self) -> Option<&dyn ExperimentTrialResults> {
+		self.as_ref().as_experiment_results()
+	}
+}
 
 /// The selection operator in a Genetic Algorithm. To be called once per generation, with optional
 /// parameter variation after evaluation each generation.
