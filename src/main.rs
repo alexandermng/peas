@@ -3,7 +3,11 @@ use std::fs;
 use clap::{Parser, Subcommand};
 use eyre::eyre;
 use peas::{
-	experiments::{ablation, partial_tests, speciation, ExperimentConfig, ExperimentRunnable},
+	experiments::{
+		ablation, partial_tests,
+		speciation::{self, SpeciationExperiment},
+		ExperimentConfig, ExperimentRunnable,
+	},
 	genetic::{Configurable, GenAlg},
 	params::{GenAlgParams, SpeciesParams},
 	prelude::*,
@@ -55,13 +59,26 @@ pub enum ExperimentCommand {
 		#[arg(short = 'F', long = "config")]
 		config: Option<String>,
 	},
-	/// Run a Speciation experiment testing different compatibility thresholds
-	Speciation,
+	/// Run a Speciation experiment testing different compatibility thresholds. Runs a linear space of thresholds across a range,
+	/// unless specific thresholds are set.
+	Speciation {
+		/// List of speciation thresholds to test.
+		#[arg(short, long, value_delimiter = ',')]
+		thresholds: Option<Vec<f64>>,
+		// TODO take in ranges
+	},
 	/// Run a Partial Test Cases experiment, testing different rates of partial test cases
 	PartialTests,
 	/// Run an Ablation study
-	Ablation,
-	// TODO include/exclude specific configs
+	Ablation {
+		/// List of configurations to include; if set, runs only these. Options are: control, no_speciation, no_crossover, no_elitism, no_partials, no_partials_no_speciation, no_partials_no_crossover.
+		#[arg(short, long, value_delimiter = ',')]
+		include: Option<Vec<String>>,
+
+		/// List of configurations to exclude; if set, overrides any --include and excludes these from being run. See --include for options
+		#[arg(short, long, value_delimiter = ',')]
+		exclude: Option<Vec<String>>,
+	},
 }
 
 impl ExperimentCommand {
@@ -72,20 +89,40 @@ impl ExperimentCommand {
 		num_runs_per: usize,
 	) -> Box<dyn ExperimentRunnable> {
 		match self {
-			ExperimentCommand::Speciation => Box::new(speciation::gen_linspace(
-				"speciation_threshold",
-				control,
-				1.5..2.5,
-				10,
-				num_runs_per,
-			)),
+			ExperimentCommand::Speciation { thresholds } => {
+				Box::new(if let Some(thresholds) = thresholds {
+					speciation::gen_selection(
+						"speciation_threshold",
+						control,
+						num_runs_per,
+						thresholds.iter().copied(),
+					)
+				} else {
+					speciation::gen_linspace(
+						"speciation_threshold",
+						control,
+						1.5..2.5,
+						10,
+						num_runs_per,
+					)
+				})
+			}
 			ExperimentCommand::PartialTests => {
 				let name = format!("partial_tests_{problem}");
 				Box::new(partial_tests::gen_basic(&name, control, num_runs_per))
 			}
-			ExperimentCommand::Ablation => {
+			ExperimentCommand::Ablation { include, exclude } => {
 				let name = format!("ablation_{problem}");
-				Box::new(ablation::gen_basic(&name, control, num_runs_per))
+				let mut out = ablation::gen_basic(&name, control, num_runs_per);
+				if let Some(incl) = include {
+					out.configurations
+						.retain(|c| incl.iter().any(|l| c.label == *l)); // retain only those in incl
+				}
+				if let Some(excl) = exclude {
+					out.configurations
+						.retain(|c| !excl.iter().any(|l| c.label == *l)); // retain only those not in excl
+				}
+				Box::new(out)
 			}
 			_ => panic!("create_experiment called on Single variant"),
 		}

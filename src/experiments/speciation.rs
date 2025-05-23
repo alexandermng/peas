@@ -16,28 +16,17 @@ use polars::prelude::*;
 
 pub type SpeciationExperiment = Experiment<SpeciationExperimentResults>;
 
-#[derive(Debug, Clone)]
-pub struct SpeciationExperimentResults {
-	pub params: HashMap<usize, String>,
-	pub data: DataFrame,
-	pub hof: HashMap<usize, Vec<u8>>,
-}
-
-/// Generates a sweep of speciation thresholds, using the given base config for all other params.
-
-pub fn gen_linspace(
+/// Generates an experiment based on a selection of speciation thresholds.
+pub fn gen_selection(
 	name: &str,
 	base_config: ExperimentConfig,
-	range: Range<f64>,
-	num_configs: usize,
 	num_runs_per: usize,
+	thresholds: impl Iterator<Item = f64>,
 ) -> SpeciationExperiment {
-	let step = (range.end - range.start) / (num_configs as f64);
-	let configs: Vec<_> = (0..num_configs)
-		.map(|i| {
-			let threshold = range.start + step * (i as f64);
+	let configs: Vec<_> = thresholds
+		.map(|threshold| {
 			base_config
-				.relabel(format!("threshold_{:.1}", threshold))
+				.relabel(format!("threshold_{:.1}", threshold)) // TODO figure out num decimal places
 				.map_params(|mut p| {
 					p.speciation = SpeciesParams {
 						enabled: true,
@@ -49,6 +38,30 @@ pub fn gen_linspace(
 		})
 		.collect();
 	SpeciationExperiment::new(name, num_runs_per, configs)
+}
+
+/// Generates a sweep of speciation thresholds, using the given base config for all other params.
+pub fn gen_linspace(
+	name: &str,
+	base_config: ExperimentConfig,
+	range: Range<f64>,
+	num_configs: usize,
+	num_runs_per: usize,
+) -> SpeciationExperiment {
+	let step = (range.end - range.start) / (num_configs as f64);
+	gen_selection(
+		name,
+		base_config,
+		num_runs_per,
+		(0..num_configs).map(|i| range.start + step * (i as f64)), // linspace
+	)
+}
+
+#[derive(Debug, Clone)]
+pub struct SpeciationExperimentResults {
+	pub params: HashMap<usize, String>,
+	pub data: DataFrame,
+	pub hof: HashMap<usize, Vec<u8>>,
 }
 
 impl Default for SpeciationExperimentResults {

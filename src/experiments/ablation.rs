@@ -53,14 +53,11 @@ pub fn gen_custom(
 	name: &str,
 	control: ExperimentConfig,
 	num_runs_per: usize,
-	enabled_configs: &[&str],
+	enabled_configs: &[impl AsRef<str>],
 ) -> AblationExperiment {
 	let mut out = gen_basic(name, control, num_runs_per);
-	out.configurations.retain(|c| {
-		enabled_configs
-			.iter()
-			.any(|label| label == &c.label.as_str())
-	});
+	out.configurations
+		.retain(|c| enabled_configs.iter().any(|en| c.label == en.as_ref()));
 	out
 }
 
