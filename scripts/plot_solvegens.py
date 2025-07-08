@@ -69,12 +69,10 @@ def main(args):
     dir = args.dir if args.dir else os.path.join("data", args.problem)
     try:
         directory = dir
-        # print("here0")
         for subdir in os.listdir(directory):
             print(os.fsdecode(subdir))
             for file in os.listdir(os.fsdecode(directory) + os.fsdecode(subdir)):  # TODO clean this up using some path.join, this is ugly
                 filename = os.fsdecode(file)
-                # print("here2")
                 if filename.endswith(".json"):  # TODO make check for "results.json"
                     jsonFlag = True
             if jsonFlag:
@@ -88,7 +86,6 @@ def main(args):
 
     fig = plot_trials(trials)
 
-    # Save and show the plot
     # TODO check if file exists and don't overwrite, ask user for confirm
     fig.savefig(args.output)
     print(f"Plot saved to '{args.output}'.")

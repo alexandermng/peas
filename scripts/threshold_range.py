@@ -2,7 +2,6 @@ import csv
 import matplotlib.pyplot as plt
 from collections import defaultdict
 
-# Parse CSV and group by trial_id
 trials = defaultdict(list)
 
 with open("../data/speciation_range/data.csv", newline="") as csvfile:
@@ -14,7 +13,6 @@ with open("../data/speciation_range/data.csv", newline="") as csvfile:
         row["max_fitness"] = float(row["max_fitness"])
         trials[trial_id].append(row)
 
-# Organize results per threshold
 threshold_stats = defaultdict(lambda: {
     "total": 0,
     "successful": 0,
@@ -31,7 +29,6 @@ for trial_id, rows in trials.items():
         threshold_stats[threshold]["successful"] += 1
         threshold_stats[threshold]["success_generations"].append(max_gen)
 
-# Prepare data for plotting
 thresholds = sorted(threshold_stats.keys())
 success_rates = []
 avg_generations = []

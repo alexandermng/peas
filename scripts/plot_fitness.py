@@ -42,14 +42,12 @@ def main(args):
         print(f"Error: Failed to parse JSON. {e}")
         return
 
-    # Valid data
     assert "max_fitnesses" in data
     assert "avg_fitnesses" in data
     assert "num_generations" in data
 
     fig = plot_data(data)
 
-    # Save and show the plot
     fig.savefig(args.output)
     print(f"Plot saved to '{args.output}'.")
     # if args.quiet == True:

@@ -1,6 +1,6 @@
 # Program Evolution through Augmenting Synthesis
 
-Research into Program Synthesis based on NEAT.
+Research into Evolutionary Program Synthesis based on NEAT.
 
 ## Architecture
 
@@ -15,16 +15,10 @@ For each example problem, we define `OurProblem` and implement it as a `Problem`
 
 We use Python for data visualization. Scripts are held in `./scripts`, with the environment managed by [uv](https://docs.astral.sh/uv/).
 
-## TODO
+## Future Work
 
-- [AN] dist for speciation
-- [AN] results logging
-- [AN] dynamic validity in mutations (e.g. how to get div working?) OR catch to send negative fitness
-- [AN] rework Solutions for RL / simulation-based fitness w/ timesteps
+- dynamic validity in mutations (e.g. how to get div working?) OR catch to send negative fitness
+- rework Solutions for RL / simulation-based fitness w/ timesteps
 - consider caching things
 - rayon parallelize compilation. also, need to config wasmtime pooling allocator? high-instantiation definitely
 - refactor: get rid of these damn type bounds (?)
-
-- graph to compare partial test cases with regular
-- stacked histogram perhaps
-- go through mutations code and critically examine for hard coding
